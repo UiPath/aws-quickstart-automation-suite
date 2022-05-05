@@ -1,0 +1,22 @@
+[
+  {
+    "ParameterKey": "AvailabilityZones",
+    "ParameterValue": "us-east-1a,us-east-1b"
+  },
+  {
+    "ParameterKey": "KeyPairName",
+    "ParameterValue": "my-key-pair-name"
+  },
+  {
+    "ParameterKey": "UiPathFQDN",
+    "ParameterValue": "single-node.my-fqdn.io"
+  },
+  {
+    "ParameterKey": "HostedZoneID",
+    "ParameterValue": "A1234567890"
+  },
+  {
+    "ParameterKey": "AcceptLicenseAgreement",
+    "ParameterValue": "true"
+  }
+]

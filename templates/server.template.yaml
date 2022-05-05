@@ -1,0 +1,1433 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates a cluster to provide high availability. (qs-1r2g4122s)
+Parameters:
+  VPCID:
+    Type: 'AWS::EC2::VPC::Id'
+  VPCCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+  PrivateSubnetIDs:
+    Description: List Private Subnet IDs where cluster VMs are launched
+    Type: CommaDelimitedList
+  PublicSubnetIDs:
+    Description: List Public Subnet IDs where Bastion hosts are launched
+    Type: CommaDelimitedList
+  DeploymentTargetGroupArn:
+    Description: ARN for Elastic load balancer target group
+    Type: 'String'
+  KubeTargetGroupArn:
+    Description: ARN for the Kube API deployment target group
+    Type: 'String'
+  Rke2RegistrationTargetGroupArn:
+    Description: ARN for the Rke 2 registration address deployment target group
+    Type: 'String'
+  KeyPairName:
+    Description: EC2 Instance Key pair name
+    Type: String
+    Default: ""
+  AmiId:
+    Description: AMI id for the cluster EC2 instances
+    Type: String
+    Default: ''
+  GpuAmiId:
+    Description: |
+      Enter the AMI Id to be used for the creation of the EC2 instances of the cluster.
+      Leave empty to determine automatically the AMI to use.
+    Type: String
+    Default: ''
+  InstanceType:
+    Description: Node Instance type
+    Type: String
+  TmInstanceType:
+    Description: Task Mining node Instance type
+    Type: String
+  GpuInstanceType:
+    Description: Gpu node Instance type
+    Type: String
+  ServerDiskSize:
+    Description: Server instances disk size
+    Type: Number
+  MultiNode:
+    Description: Create a highly available deployment or a single node.
+    Type: String
+    Default: 'Multi Node'
+    AllowedValues:
+      - "Single Node"
+      - "Multi Node"
+  PerformInstallation:
+    Description: Perform the Service Fabric installation
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  TaskMining:
+    Description: Choose false to disable Task Mining installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AddGpu:
+    Description: >-
+      Choose true to add GPU VMs to the deployment.
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DeployBastion:
+    Description: Deploy a bastion host inside the public subnet
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - 'true'
+      - 'false'
+  ServerInstanceCount:
+    Description: Initial server instance count
+    Type: String
+  AgentInstanceCount:
+    Description: Initial agent instance count
+    Type: String
+  FindAMIFunctionArn:
+    Description: ARN for Lambda function used to find AMI by name
+    Type: String
+  IamRoleArn:
+    Description: ARN of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Type: String
+    Default: ''
+  IamRoleName:
+    Description: Name of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Type: String
+    Default: ''
+  QSS3BucketName:
+    Type: String
+    Description: Name of bucket storing the quickstart files
+  QSS3BucketRegion:
+    Type: String
+    Description: Name of region where the bucket storing the quickstart files is located
+  QSS3KeyPrefix:
+    Type: String
+    Description: Quickstart bucket prefix
+  InputJsonSecretArn:
+    Description: ARN of Secret where the input json file is located
+    Type: String
+  KubeconfigSecretArn:
+    Description: ARN of Secret where the kubeconfig file is stored
+    Type: String
+  InstallerDownloadUrl:
+    Description: Installer download URL
+    Type: String
+  BackupFileSystemDns:
+    Description: DNS name of the backup server
+    Type: String
+    Default: ""
+Conditions:
+  UsingDefaultBucket: !Equals
+    - !Ref QSS3BucketName
+    - uipath-s3-quickstart
+  IsMultiNode: !Equals
+    - !Ref MultiNode
+    - "Multi Node"
+  IsPerformingInstallation: !Equals
+    - !Ref PerformInstallation
+    - "true"
+  InstallingTaskMining: !Equals
+    - !Ref TaskMining
+    - "true"
+  DeployingGpu: !Equals
+    - !Ref AddGpu
+    - "true"
+  FindingAmiAtDeploy: !Equals
+    - !Ref AmiId
+    - ''
+  FindingGpuAmiAtDeploy: !Equals
+    - !Ref GpuAmiId
+    - ''
+  UsingPublicSubnets: !Not [!Equals ['', !Join ["", !Ref PublicSubnetIDs]]]
+  DeployingBastion: !And
+    - !Equals [!Ref DeployBastion, 'true']
+    - !Condition UsingPublicSubnets
+  HasKeyName: !Not [!Equals [!Ref KeyPairName, ""]]
+  DeployIam: !Or
+    - !Equals ["", !Ref IamRoleArn]
+    - !Equals ["", !Ref IamRoleName]
+  IsBackupEnabled: !Not [ !Equals [ !Ref BackupFileSystemDns, "" ] ]
+Resources:
+  ServiceFabricSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security Group allowing access to UiPath applications
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 6443
+          ToPort: 6443
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 9345
+          ToPort: 9345
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 8472
+          ToPort: 8472
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 10250
+          ToPort: 10250
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 2379
+          ToPort: 2379
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 2380
+          ToPort: 2380
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 30000
+          ToPort: 32767
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: udp
+          FromPort: 8472
+          ToPort: 8472
+          CidrIp: !Ref VPCCIDR
+  InstanceAMI:
+    Type: 'Custom::InstanceAMI'
+    Condition: FindingAmiAtDeploy
+    Properties:
+      ServiceToken: !Ref FindAMIFunctionArn
+      RegionName: !Ref 'AWS::Region'
+      ImageName: RHEL-8.3*_HVM-20*
+      Architecture: x86_64
+      VirtualizationType: hvm
+      Owners: '309956199498'
+
+  GpuInstanceAMI:
+    Type: 'Custom::InstanceAMI'
+    Condition: FindingGpuAmiAtDeploy
+    Properties:
+      ServiceToken: !Ref FindAMIFunctionArn
+      RegionName: !Ref 'AWS::Region'
+      ImageName: RHEL-8.2*_HVM-20*
+      Architecture: x86_64
+      VirtualizationType: hvm
+      Owners: '309956199498'
+
+
+  ServiceFabricIamRole:
+    Type: 'AWS::IAM::Role'
+    Condition: DeployIam
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Description: IAM Role providing required access for EC2 instance
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  ServiceFabricInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+        - !If [DeployIam, !Ref ServiceFabricIamRole, !Ref IamRoleName]
+      Path: '/'
+  LogsAccessPolicy:
+    Type: 'AWS::IAM::Policy'
+    Condition: DeployIam
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+              - logs:DescribeLogGroups
+              - logs:CreateLogStream
+              - logs:CreateLogGroup
+            Resource:
+              - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+            Effect: Allow
+          - Action:
+              - cloudwatch:PutMetricData
+            Resource:
+              - !Sub "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}::*"
+            Effect: Allow
+          - Action:
+              - "xray:PutTraceSegments"
+            Effect: "Allow"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:xray:${AWS::Region}:${AWS::AccountId}:*"
+      PolicyName: CloudwatchLogsAccess
+      Roles:
+        - !Ref ServiceFabricIamRole
+  Ec2QueryPolicy:
+    Type: 'AWS::IAM::Policy'
+    Condition: DeployIam
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - ec2:DescribeVolumes
+              - ec2:DescribeTags
+              - ec2:DescribeInstances
+            Resource:
+              - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:*"
+            Effect: Allow
+          - Action:
+              - autoscaling:DescribeAutoScalingInstances
+              - autoscaling:DescribeAutoScalingGroups
+            Resource:
+              - "*"
+            Effect: Allow
+          - Action:
+              - ec2:DescribeImages
+              - ec2:DescribeInstanceTypes
+              - ec2:DescribeInstanceTypeOfferings
+            Resource:
+              - "*"
+            Effect: Allow
+      PolicyName: Ec2QueryPolicy
+      Roles:
+        - !Ref ServiceFabricIamRole
+  QuickstartS3IAMPolicy:
+    Type: 'AWS::IAM::Policy'
+    Condition: DeployIam
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - s3:GetObject
+            Resource: !Sub
+              - arn:${AWS::Partition}:s3:::${S3Bucket}/${QSS3KeyPrefix}*
+              - S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+            Effect: Allow
+      PolicyName: AwsQuickstartS3Access
+      Roles:
+        - !Ref ServiceFabricIamRole
+  InputJsonSecretPolicy:
+    Type: 'AWS::IAM::Policy'
+    Condition: DeployIam
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - "secretsmanager:GetSecretValue"
+              - "secretsmanager:PutSecretValue"
+            Resource:
+              - !Ref InputJsonSecretArn
+            Effect: Allow
+      PolicyName: InputJsonReadAccess
+      Roles:
+        - !Ref ServiceFabricIamRole
+  KubeconfigSecretPolicy:
+    Type: 'AWS::IAM::Policy'
+    Condition: DeployIam
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - "secretsmanager:GetSecretValue"
+              - "secretsmanager:PutSecretValue"
+            Resource:
+              - !Ref KubeconfigSecretArn
+            Effect: Allow
+      PolicyName: KubeConfigReadWriteAccess
+      Roles:
+        - !Ref ServiceFabricIamRole
+  ServerLaunchConfiguration:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        S3AccessCreds:
+          type: S3
+          roleName: !If [DeployIam, !Ref ServiceFabricIamRole, !Ref IamRoleName]
+          buckets: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+            - disk_setup
+            - aws_cli_setup
+            - cloudwatch_agent_setup
+            - install_ssm_agent
+            - download_sf
+            - install_server
+        disk_setup:
+          files:
+            /root/init-disk.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/init-disk.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+            /root/ebsnvme-id.py:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/ebsnvme-id.py'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_execute_prereqs:
+              command: dnf -y install unzip jq tree lvm2 bc
+            02_execute_init_disk:
+              command: /root/init-disk.sh
+        aws_cli_setup:
+          files:
+            /tmp/awscliv2.zip:
+              source: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+          commands:
+            01_unzip_cli:
+              command: unzip -o /tmp/awscliv2.zip -d /tmp
+            02_install_cli:
+              command: /tmp/aws/install --update
+        install_ssm_agent:
+          commands:
+            01enable_ssm_agent:
+              command: !Sub 'dnf install -y https://s3.${AWS::Region}.amazonaws.com/amazon-ssm-${AWS::Region}/latest/linux_amd64/amazon-ssm-agent.rpm'
+              ignoreErrors: "true"
+            02enable_ssm_agent:
+              command: systemctl enable amazon-ssm-agent
+              ignoreErrors: "true"
+            03start_ssm_agent:
+              command: systemctl start amazon-ssm-agent
+              ignoreErrors: "true"
+        download_sf:
+          files:
+            /root/sf-installer.zip:
+              source: !Ref InstallerDownloadUrl
+              owner: "root"
+              group: "root"
+              mode: "00700"
+            /root/upload-kubeconfig.sh:
+              content: !Sub |
+                #!/bin/bash -x
+                cp /etc/rancher/rke2/rke2.yaml /root/kubeconfig.yaml
+                registration_url="$(jq -r ".fixed_rke_address" <"/root/installer/input.json")"
+                sed -i "s|127.0.0.1|$registration_url|" /root/kubeconfig.yaml
+                /usr/local/bin/aws secretsmanager put-secret-value --secret-id "${KubeconfigSecretArn}" --secret-string file:///root/kubeconfig.yaml
+              owner: "root"
+              group: "root"
+              mode: "00700"
+          commands:
+            01_unzip_installer:
+              command: unzip -o /root/sf-installer.zip -d /root/installer
+            02_set_permissions:
+              command: chmod -R +r,+w,+x /root/installer/*
+            03_download_input:
+              command: !Sub /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${InputJsonSecretArn}" | jq '.SecretString | fromjson' > /root/installer/input.json
+        install_server:
+          files:
+            /root/install-server.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-server.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+            /root/installer/backup.json:
+              content: !Sub |
+                {
+                  "backup": {
+                    "etcdBackupPath": "/backup",
+                    "nfs": {
+                      "endpoint": "${BackupFileSystemDns}",
+                      "mountpath": "/"
+                    }
+                  },
+                  "backup_interval": "15"
+                }
+              owner: "root"
+              group: "root"
+              mode: "000700"
+            /root/installer/generate-certs.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/generate-certs.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_install_server:
+              command: !If
+                - IsPerformingInstallation
+                - !If
+                  - IsBackupEnabled
+                  - (trap "" SIGPIPE; export HOME="/root"; /root/install-server.sh -b)
+                  - (trap "" SIGPIPE; export HOME="/root"; /root/install-server.sh)
+                - echo "Done"
+        cloudwatch_agent_setup:
+          files:
+            /tmp/amazon-cloudwatch-agent.rpm:
+              source: "https://s3.amazonaws.com/amazoncloudwatch-agent/redhat/amd64/latest/amazon-cloudwatch-agent.rpm"
+            /opt/aws/amazon-cloudwatch-agent/config.json:
+              content: !Sub |
+                {
+                  "logs": {
+                    "logs_collected": {
+                      "files": {
+                        "collect_list": [
+                          {
+                            "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "amazon-cloudwatch-agent.log"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init-cmd.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init-cmd"
+                          }
+                        ]
+                      }
+                    },
+                    "log_stream_name": "default.log",
+                    "force_flush_interval" : 15
+                  }
+                }
+          commands:
+            01_install_cw_agent:
+              command: if rpm -ivh --test /tmp/amazon-cloudwatch-agent.rpm; then rpm -U /tmp/amazon-cloudwatch-agent.rpm; else echo "CW agent already installed"; fi
+              ignoreErrors: "true"
+            02_start_cw_agent:
+              command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
+              ignoreErrors: "true"
+
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              DeleteOnTermination: false
+              Encrypted: true
+              VolumeSize: 128
+              VolumeType: gp2
+          - DeviceName: /dev/sdb
+            Ebs:
+              DeleteOnTermination: false
+              Encrypted: true
+              VolumeSize: !Ref ServerDiskSize
+              VolumeType: gp2
+          - DeviceName: /dev/sdc
+            Ebs:
+              DeleteOnTermination: false
+              Encrypted: true
+              VolumeSize: 32
+              VolumeType: io1
+              Iops: 120
+          - DeviceName: /dev/sdd
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 300
+              VolumeType: gp2
+        ImageId: !If [FindingAmiAtDeploy, !GetAtt InstanceAMI.ImageId, !Ref AmiId]
+        IamInstanceProfile:
+          Arn: !GetAtt ServiceFabricInstanceProfile.Arn
+        InstanceType: !Ref InstanceType
+        KeyName: !If [HasKeyName, !Ref KeyPairName, !Ref "AWS::NoValue"]
+        SecurityGroupIds:
+          - !GetAtt ServiceFabricSecurityGroup.GroupId
+        UserData: !Base64
+          Fn::Sub: |
+            #!/bin/bash -x
+            dnf update -y
+            dnf install -y python3
+            dnf install -y wget unzip jq
+            mkdir -p /opt/aws/bin
+            wget -O /tmp/aws-cfn-bootstrap-py3-latest.tar.gz https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+            python3 -m easy_install --script-dir /opt/aws/bin /tmp/aws-cfn-bootstrap-py3-latest.tar.gz
+            /opt/aws/bin/cfn-init -v \
+                     --stack ${AWS::StackName} \
+                     --resource ServerLaunchConfiguration \
+                     --configsets config \
+                     --region ${AWS::Region}
+  
+            /opt/aws/bin/cfn-signal -e $? \
+                     --stack ${AWS::StackName } \
+                     --resource ServerAutoScalingGroup \
+                     --region ${AWS::Region }
+
+  AgentLaunchConfiguration:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Condition: IsMultiNode
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        S3AccessCreds:
+          type: S3
+          roleName: !If [DeployIam, !Ref ServiceFabricIamRole, !Ref IamRoleName]
+          buckets: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+            - disk_setup
+            - aws_cli_setup
+            - cloudwatch_agent_setup
+            - install_ssm_agent
+            - download_sf
+            - install_agent
+        disk_setup:
+          files:
+            /root/init-disk.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/init-disk.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+            /root/ebsnvme-id.py:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/ebsnvme-id.py'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_execute_prereqs:
+              command: dnf -y install unzip jq tree lvm2 bc
+            02_execute_init_disk:
+              command: /root/init-disk.sh
+        aws_cli_setup:
+          files:
+            /tmp/awscliv2.zip:
+              source: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+          commands:
+            01_unzip_cli:
+              command: unzip -o /tmp/awscliv2.zip -d /tmp
+            02_install_cli:
+              command: /tmp/aws/install --update
+        install_ssm_agent:
+          commands:
+            01enable_ssm_agent:
+              command: !Sub 'dnf install -y https://s3.${AWS::Region}.amazonaws.com/amazon-ssm-${AWS::Region}/latest/linux_amd64/amazon-ssm-agent.rpm'
+              ignoreErrors: "true"
+            02enable_ssm_agent:
+              command: systemctl enable amazon-ssm-agent
+              ignoreErrors: "true"
+            03start_ssm_agent:
+              command: systemctl start amazon-ssm-agent
+              ignoreErrors: "true"
+        download_sf:
+          files:
+            /root/sf-installer.zip:
+              source: !Ref InstallerDownloadUrl
+              owner: "root"
+              group: "root"
+              mode: "00700"
+          commands:
+            01_unzip_installer:
+              command: unzip -o /root/sf-installer.zip -d /root/installer
+            02_set_permissions:
+              command: chmod -R +r,+w,+x /root/installer/*
+            03_download_input:
+              command: !Sub /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${InputJsonSecretArn}" | jq '.SecretString | fromjson' > /root/installer/input.json
+        install_agent:
+          files:
+            /root/install-agent.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-agent.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_install_agent:
+              command: !If
+                - IsPerformingInstallation
+                - (trap "" SIGPIPE; export HOME="/root"; /root/install-agent.sh)
+                - echo "Done"
+        cloudwatch_agent_setup:
+          files:
+            /tmp/amazon-cloudwatch-agent.rpm:
+              source: "https://s3.amazonaws.com/amazoncloudwatch-agent/redhat/amd64/latest/amazon-cloudwatch-agent.rpm"
+            /opt/aws/amazon-cloudwatch-agent/config.json:
+              content: !Sub |
+                {
+                  "logs": {
+                    "logs_collected": {
+                      "files": {
+                        "collect_list": [
+                          {
+                            "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "amazon-cloudwatch-agent.log"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init-cmd.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init-cmd"
+                          }
+                        ]
+                      }
+                    },
+                    "log_stream_name": "default.log",
+                    "force_flush_interval" : 15
+                  }
+                }
+          commands:
+            01_install_cw_agent:
+              command: if rpm -ivh --test /tmp/amazon-cloudwatch-agent.rpm; then rpm -U /tmp/amazon-cloudwatch-agent.rpm; else echo "CW agent already installed"; fi
+              ignoreErrors: "true"
+            02_start_cw_agent:
+              command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
+              ignoreErrors: "true"
+
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 128
+              VolumeType: gp2
+          - DeviceName: /dev/sdd
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 300
+              VolumeType: gp2
+        ImageId: !If [FindingAmiAtDeploy, !GetAtt InstanceAMI.ImageId, !Ref AmiId]
+        IamInstanceProfile:
+          Arn: !GetAtt ServiceFabricInstanceProfile.Arn
+        InstanceType: !Ref InstanceType
+        KeyName: !If [HasKeyName, !Ref KeyPairName, !Ref "AWS::NoValue"]
+        SecurityGroupIds:
+          - !GetAtt ServiceFabricSecurityGroup.GroupId
+        UserData: !Base64
+          Fn::Sub: |
+            #!/bin/bash -x
+            dnf update -y
+            dnf install -y python3
+            dnf install -y wget unzip jq
+            mkdir -p /opt/aws/bin
+            wget -O /tmp/aws-cfn-bootstrap-py3-latest.tar.gz https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+            python3 -m easy_install --script-dir /opt/aws/bin /tmp/aws-cfn-bootstrap-py3-latest.tar.gz
+            /opt/aws/bin/cfn-init -v \
+                     --stack ${AWS::StackName} \
+                     --resource AgentLaunchConfiguration \
+                     --configsets config \
+                     --region ${AWS::Region}
+  
+            /opt/aws/bin/cfn-signal -e $? \
+                     --stack ${AWS::StackName } \
+                     --resource AgentAutoScalingGroup \
+                     --region ${AWS::Region }
+
+  AgentAutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Condition: IsMultiNode
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref AgentInstanceCount
+        Timeout: PT2H
+    Properties:
+      DesiredCapacity: !Ref AgentInstanceCount
+      HealthCheckType: EC2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref AgentLaunchConfiguration
+        Version: !GetAtt
+          - AgentLaunchConfiguration
+          - LatestVersionNumber
+      MaxSize: !Ref AgentInstanceCount
+      MetricsCollection:
+        - Granularity: 1Minute
+          Metrics:
+            - GroupMinSize
+            - GroupMaxSize
+            - GroupDesiredCapacity
+            - GroupInServiceInstances
+            - GroupTotalInstances
+      MinSize: !Ref AgentInstanceCount
+      Tags:
+        - Key: Name
+          PropagateAtLaunch: true
+          Value: 'UIPath-ServiceFabric-Agents'
+      TargetGroupARNs:
+        - !Ref DeploymentTargetGroupArn
+      VPCZoneIdentifier: !Ref PrivateSubnetIDs
+
+  ServerAutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ServerInstanceCount
+        Timeout: PT2H
+    Properties:
+      DesiredCapacity: !Ref ServerInstanceCount
+      HealthCheckType: EC2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ServerLaunchConfiguration
+        Version: !GetAtt
+          - ServerLaunchConfiguration
+          - LatestVersionNumber
+      MaxSize: !Ref ServerInstanceCount
+      MetricsCollection:
+        - Granularity: 1Minute
+          Metrics:
+            - GroupMinSize
+            - GroupMaxSize
+            - GroupDesiredCapacity
+            - GroupInServiceInstances
+            - GroupTotalInstances
+      MinSize: !Ref ServerInstanceCount
+      Tags:
+        - Key: Name
+          PropagateAtLaunch: true
+          Value: 'UIPath-ServiceFabric-Servers'
+      TargetGroupARNs:
+        - !Ref DeploymentTargetGroupArn
+        - !Ref KubeTargetGroupArn
+        - !Ref Rke2RegistrationTargetGroupArn
+      VPCZoneIdentifier: !Ref PrivateSubnetIDs
+  BastionSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Condition: DeployingBastion
+    Properties:
+      GroupDescription: Security Group allowing SSH access to the bastion
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  AsgProcessModificationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+      Policies:
+        - PolicyName: AsgProcessModification
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - autoscaling:ResumeProcesses
+              - autoscaling:SuspendProcesses
+              Resource: !Sub arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${ServerAutoScalingGroup}
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
+
+  AsgProcessModifierFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Modifies ASG processes during CF stack creation
+      Code:
+        S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+        S3Key: !Sub '${QSS3KeyPrefix}functions/packages/PatchAsg/lambda.zip'
+      Handler: lambda_function.handler
+      Role: !If [DeployIam, !GetAtt AsgProcessModificationRole.Arn, !Ref IamRoleArn]
+      Runtime: python3.6
+      Timeout: 30
+
+  ModifyAsg:
+    Type: 'Custom::ModifyAsg'
+    Properties:
+      ServiceToken: !GetAtt AsgProcessModifierFunction.Arn
+      AutoScalingGroupName: !Ref ServerAutoScalingGroup
+      RegionName: !Ref 'AWS::Region'
+
+  BastionHost:
+    Type: 'AWS::EC2::Instance'
+    Condition: DeployingBastion
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        S3AccessCreds:
+          type: S3
+          roleName: !If [DeployIam, !Ref ServiceFabricIamRole, !Ref IamRoleName]
+          buckets: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+            - aws_cli_setup
+            - cloudwatch_agent_setup
+        aws_cli_setup:
+          files:
+            /tmp/awscliv2.zip:
+              source: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+          commands:
+            01_unzip_cli:
+              command: unzip -o /tmp/awscliv2.zip -d /tmp
+            02_install_cli:
+              command: /tmp/aws/install --update
+        cloudwatch_agent_setup:
+          files:
+            /tmp/amazon-cloudwatch-agent.rpm:
+              source: "https://s3.amazonaws.com/amazoncloudwatch-agent/redhat/amd64/latest/amazon-cloudwatch-agent.rpm"
+            /opt/aws/amazon-cloudwatch-agent/config.json:
+              content: !Sub |
+                {
+                  "logs": {
+                    "logs_collected": {
+                      "files": {
+                        "collect_list": [
+                          {
+                            "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "amazon-cloudwatch-agent.log"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init-cmd.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init-cmd"
+                          }
+                        ]
+                      }
+                    },
+                    "log_stream_name": "default.log",
+                    "force_flush_interval" : 15
+                  }
+                }
+          commands:
+            01_install_cw_agent:
+              command: if rpm -ivh --test /tmp/amazon-cloudwatch-agent.rpm; then rpm -U /tmp/amazon-cloudwatch-agent.rpm; else echo "CW agent already installed"; fi
+              ignoreErrors: "true"
+            02_start_cw_agent:
+              command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
+              ignoreErrors: "true"
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT1H
+    Properties:
+      IamInstanceProfile: !Ref ServiceFabricInstanceProfile
+      ImageId: !If [FindingAmiAtDeploy, !GetAtt InstanceAMI.ImageId, !Ref AmiId]
+      InstanceType: "t3.large"
+      KeyName: !If [HasKeyName, !Ref KeyPairName, !Ref "AWS::NoValue"]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: false
+            VolumeSize: 200
+            VolumeType: gp2
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeleteOnTermination: true
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref BastionSecurityGroup
+          SubnetId: !Select ['0', !Ref PublicSubnetIDs]
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash -x
+          dnf update -y
+          dnf install -y python3
+          dnf install -y wget unzip jq
+          mkdir -p /opt/aws/bin
+          wget -O /tmp/aws-cfn-bootstrap-py3-latest.tar.gz https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          python3 -m easy_install --script-dir /opt/aws/bin /tmp/aws-cfn-bootstrap-py3-latest.tar.gz
+          /opt/aws/bin/cfn-init -v \
+                   --stack ${AWS::StackName} \
+                   --resource BastionHost \
+                   --configsets config \
+                   --region ${AWS::Region}
+
+          /opt/aws/bin/cfn-signal -e $? \
+                   --stack ${AWS::StackName } \
+                   --resource BastionHost \
+                   --region ${AWS::Region }
+
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-UIPath-ServiceFabric-Bastion'
+
+  TaskMiningNode:
+    Type: 'AWS::EC2::Instance'
+    Condition: InstallingTaskMining
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        S3AccessCreds:
+          type: S3
+          roleName: !If [DeployIam, !Ref ServiceFabricIamRole, !Ref IamRoleName]
+          buckets: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+            - disk_setup
+            - aws_cli_setup
+            - cloudwatch_agent_setup
+            - install_ssm_agent
+            - download_sf
+            - install_tm
+        disk_setup:
+          files:
+            /root/init-disk.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/init-disk.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+            /root/ebsnvme-id.py:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/ebsnvme-id.py'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_execute_prereqs:
+              command: dnf -y install unzip jq tree lvm2 bc
+            02_execute_init_disk:
+              command: /root/init-disk.sh
+        aws_cli_setup:
+          files:
+            /tmp/awscliv2.zip:
+              source: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+          commands:
+            01_unzip_cli:
+              command: unzip -o /tmp/awscliv2.zip -d /tmp
+            02_install_cli:
+              command: /tmp/aws/install --update
+        install_ssm_agent:
+          commands:
+            01enable_ssm_agent:
+              command: !Sub 'dnf install -y https://s3.${AWS::Region}.amazonaws.com/amazon-ssm-${AWS::Region}/latest/linux_amd64/amazon-ssm-agent.rpm'
+              ignoreErrors: "true"
+            02enable_ssm_agent:
+              command: systemctl enable amazon-ssm-agent
+              ignoreErrors: "true"
+            03start_ssm_agent:
+              command: systemctl start amazon-ssm-agent
+              ignoreErrors: "true"
+        download_sf:
+          files:
+            /root/sf-installer.zip:
+              source: !Ref InstallerDownloadUrl
+              owner: "root"
+              group: "root"
+              mode: "00700"
+            /root/download-kubeconfig.sh:
+              content: !Sub |
+                #!/bin/bash -x
+                /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${KubeconfigSecretArn}" | jq -r '.SecretString' > /root/kubeconfig.yaml
+              owner: "root"
+              group: "root"
+              mode: "00700"
+          commands:
+            01_unzip_installer:
+              command: unzip -o /root/sf-installer.zip -d /root/installer
+            02_set_permissions:
+              command: chmod -R +r,+w,+x /root/installer/*
+            03_download_input:
+              command: !Sub /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${InputJsonSecretArn}" | jq '.SecretString | fromjson' > /root/installer/input.json
+        install_tm:
+          files:
+            /root/install-tm.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-tm.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_install_agent:
+              command: !If
+                - IsPerformingInstallation
+                - (trap "" SIGPIPE; export HOME="/root"; /root/install-tm.sh)
+                - echo "Done"
+        cloudwatch_agent_setup:
+          files:
+            /tmp/amazon-cloudwatch-agent.rpm:
+              source: "https://s3.amazonaws.com/amazoncloudwatch-agent/redhat/amd64/latest/amazon-cloudwatch-agent.rpm"
+            /opt/aws/amazon-cloudwatch-agent/config.json:
+              content: !Sub |
+                {
+                  "logs": {
+                    "logs_collected": {
+                      "files": {
+                        "collect_list": [
+                          {
+                            "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "amazon-cloudwatch-agent.log"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init-cmd.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init-cmd"
+                          }
+                        ]
+                      }
+                    },
+                    "log_stream_name": "default.log",
+                    "force_flush_interval" : 15
+                  }
+                }
+          commands:
+            01_install_cw_agent:
+              command: if rpm -ivh --test /tmp/amazon-cloudwatch-agent.rpm; then rpm -U /tmp/amazon-cloudwatch-agent.rpm; else echo "CW agent already installed"; fi
+              ignoreErrors: "true"
+            02_start_cw_agent:
+              command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
+              ignoreErrors: "true"
+
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT1H
+    Properties:
+      IamInstanceProfile: !Ref ServiceFabricInstanceProfile
+      ImageId: !If [FindingAmiAtDeploy, !GetAtt InstanceAMI.ImageId, !Ref AmiId]
+      InstanceType: !Ref TmInstanceType
+      KeyName: !If [HasKeyName, !Ref KeyPairName, !Ref "AWS::NoValue"]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 128
+            VolumeType: gp2
+        - DeviceName: /dev/sdd
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 300
+            VolumeType: gp2
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: false
+          DeleteOnTermination: true
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref ServiceFabricSecurityGroup
+          SubnetId: !Select ['0', !Ref PrivateSubnetIDs]
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash -x
+          dnf update -y
+          dnf install -y python3
+          dnf install -y wget unzip jq
+          mkdir -p /opt/aws/bin
+          wget -O /tmp/aws-cfn-bootstrap-py3-latest.tar.gz https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          python3 -m easy_install --script-dir /opt/aws/bin /tmp/aws-cfn-bootstrap-py3-latest.tar.gz
+          /opt/aws/bin/cfn-init -v \
+                   --stack ${AWS::StackName} \
+                   --resource TaskMiningNode \
+                   --configsets config \
+                   --region ${AWS::Region}
+
+          /opt/aws/bin/cfn-signal -e $? \
+                   --stack ${AWS::StackName } \
+                   --resource TaskMiningNode \
+                   --region ${AWS::Region }
+
+      Tags:
+        - Key: Name
+          Value: 'UiPath-ServiceFabric-TaskMining'
+
+  GpuEnabledNode:
+    Type: 'AWS::EC2::Instance'
+    Condition: DeployingGpu
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        S3AccessCreds:
+          type: S3
+          roleName: !If [DeployIam, !Ref ServiceFabricIamRole, !Ref IamRoleName]
+          buckets: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+            - disk_setup
+            - aws_cli_setup
+            - cloudwatch_agent_setup
+            - install_ssm_agent
+            - download_sf
+            - install_gpu_drivers
+        disk_setup:
+          files:
+            /root/init-disk.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/init-disk.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+            /root/ebsnvme-id.py:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/ebsnvme-id.py'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_execute_prereqs:
+              command: dnf -y install unzip jq tree lvm2 bc
+            02_execute_init_disk:
+              command: /root/init-disk.sh
+        aws_cli_setup:
+          files:
+            /tmp/awscliv2.zip:
+              source: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+          commands:
+            01_unzip_cli:
+              command: unzip -o /tmp/awscliv2.zip -d /tmp
+            02_install_cli:
+              command: /tmp/aws/install --update
+        cloudwatch_agent_setup:
+          files:
+            /tmp/amazon-cloudwatch-agent.rpm:
+              source: "https://s3.amazonaws.com/amazoncloudwatch-agent/redhat/amd64/latest/amazon-cloudwatch-agent.rpm"
+            /opt/aws/amazon-cloudwatch-agent/config.json:
+              content: !Sub |
+                {
+                  "logs": {
+                    "logs_collected": {
+                      "files": {
+                        "collect_list": [
+                          {
+                            "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "amazon-cloudwatch-agent.log"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init-cmd.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init-cmd"
+                          }
+                        ]
+                      }
+                    },
+                    "log_stream_name": "default.log",
+                    "force_flush_interval" : 15
+                  }
+                }
+          commands:
+            01_install_cw_agent:
+              command: if rpm -ivh --test /tmp/amazon-cloudwatch-agent.rpm; then rpm -U /tmp/amazon-cloudwatch-agent.rpm; else echo "CW agent already installed"; fi
+              ignoreErrors: "true"
+            02_start_cw_agent:
+              command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
+              ignoreErrors: "true"
+        install_ssm_agent:
+          commands:
+            01enable_ssm_agent:
+              command: !Sub 'dnf install -y https://s3.${AWS::Region}.amazonaws.com/amazon-ssm-${AWS::Region}/latest/linux_amd64/amazon-ssm-agent.rpm'
+              ignoreErrors: "true"
+            02enable_ssm_agent:
+              command: systemctl enable amazon-ssm-agent
+              ignoreErrors: "true"
+            03start_ssm_agent:
+              command: systemctl start amazon-ssm-agent
+              ignoreErrors: "true"
+        download_sf:
+          files:
+            /root/sf-installer.zip:
+              source: !Ref InstallerDownloadUrl
+              owner: "root"
+              group: "root"
+              mode: "00700"
+            /root/download-kubeconfig.sh:
+              content: !Sub |
+                #!/bin/bash -x
+                /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${KubeconfigSecretArn}" | jq -r '.SecretString' > /root/kubeconfig.yaml
+              owner: "root"
+              group: "root"
+              mode: "00700"
+          commands:
+            01_unzip_installer:
+              command: unzip -o /root/sf-installer.zip -d /root/installer
+            02_set_permissions:
+              command: chmod -R +r,+w,+x /root/installer/*
+            03_download_input:
+              command: !Sub /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${InputJsonSecretArn}" | jq '.SecretString | fromjson' > /root/installer/input.json
+        install_gpu_drivers:
+          files:
+            /opt/uipath/install-gpu.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-gpu.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+            /etc/systemd/system/install-gpu.service:
+              content: |
+                [Unit]
+                Description=Install GPU drivers post reboot
+                After=multi-user.target
+
+                [Service]
+                Type=oneshot
+                ExecStart=/bin/bash /opt/uipath/install-gpu.sh
+                RemainAfterExit=true
+                StandardOutput=journal
+                User=root
+
+                [Install]
+                WantedBy=multi-user.target
+              owner: "root"
+              group: "root"
+              mode: "000644"
+            /opt/uipath/signal-resource.sh:
+              content: !Sub |
+                #!/bin/bash
+                set -eux
+
+                /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName } --resource GpuEnabledNode --region ${AWS::Region }
+              mode: "000744"
+              owner: "root"
+              group: "root"
+            /root/install-agent.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-agent.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+
+          commands:
+            01_create_service:
+              command: systemctl enable install-gpu
+            02_install_kernel:
+              command: yum install -y kernel kernel-tools kernel-headers kernel-devel
+            03_reboot:
+              command: reboot
+            04_wait_reboot:
+              command: date && sleep 60
+        install_agent:
+          files:
+            /root/install-agent.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-agent.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_install_agent:
+              command: !If
+                - IsPerformingInstallation
+                - (trap "" SIGPIPE; export HOME="/root"; /root/install-agent.sh)
+                - echo "Done"
+
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT1H
+    Properties:
+      IamInstanceProfile: !Ref ServiceFabricInstanceProfile
+      ImageId: !If [FindingGpuAmiAtDeploy, !GetAtt GpuInstanceAMI.ImageId, !Ref GpuAmiId]
+      InstanceType: !Ref GpuInstanceType
+      KeyName: !If [HasKeyName, !Ref KeyPairName, !Ref "AWS::NoValue"]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 128
+            VolumeType: gp2
+        - DeviceName: /dev/sdd
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 300
+            VolumeType: gp2
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: false
+          DeleteOnTermination: true
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref ServiceFabricSecurityGroup
+          SubnetId: !Select ['0', !Ref PrivateSubnetIDs]
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash -x
+          dnf install -y python3
+          dnf install -y wget unzip jq
+          mkdir -p /opt/aws/bin
+          wget -O /tmp/aws-cfn-bootstrap-py3-latest.tar.gz https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          python3 -m easy_install --script-dir /opt/aws/bin --prefix=/usr /tmp/aws-cfn-bootstrap-py3-latest.tar.gz
+          if ! /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource GpuEnabledNode --configsets config --region ${AWS::Region}; then
+              /opt/aws/bin/cfn-signal -e 1 \
+                                 --stack ${AWS::StackName } \
+                                 --resource GpuEnabledNode \
+                                 --region ${AWS::Region }
+          fi
+      Tags:
+        - Key: Name
+          Value: 'UiPath-ServiceFabric-GpuNode'

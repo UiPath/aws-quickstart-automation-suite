@@ -1,0 +1,292 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This template creates a Multi-AZ, multi-subnet VPC infrastructure with UIPath
+  Automation Suite deployed in private subnets, with a Load Balancer behind Route 53 in
+  public subnets. (qs-1r2g4122s)
+Metadata:
+  QuickStartDocumentation:
+    EntrypointName: Launch into a new VPC
+    Order: "1"
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: Availability Zone configuration
+        Parameters:
+          - AvailabilityZones
+          - NumberOfAZs
+      - Label:
+          default: Automation Suite instance configuration
+        Parameters:
+          - KeyPairName
+      - Label:
+          default: Automation Suite deployment configuration
+        Parameters:
+          - MultiNode
+          - UseLevel7LoadBalancer
+          - UiPathVersion
+          - ServiceProfile
+          - AddGpu
+      - Label:
+          default: DNS or SSL configuration
+        Parameters:
+          - UiPathFQDN
+          - HostedZoneID
+      - Label:
+          default: Quick Start S3 bucket configuration
+        Parameters:
+          - QSS3BucketName
+          - QSS3KeyPrefix
+          - QSS3BucketRegion
+    ParameterLabels:
+      AvailabilityZones:
+        default: Availability Zones
+      NumberOfAZs:
+        default: Number of Availability Zones
+      KeyPairName:
+        default: Instance key pair
+      MultiNode:
+        default: Deployment type
+      UseLevel7LoadBalancer:
+        default: Load Balancer
+      UiPathVersion:
+        default: Automation Suite version
+      ServiceProfile:
+        default: Automation Suite product selection
+      AddGpu:
+        default: Add GPU enabled VMs
+      UiPathFQDN:
+        default: Hosting FQDN
+      HostedZoneID:
+        default: ID of Route 53 hosted zone
+      QSS3BucketName:
+        default: Template-hosting S3 bucket
+      QSS3KeyPrefix:
+        default: Template folder
+      QSS3BucketRegion:
+        default: Template-hosting S3 region
+Parameters:
+  AvailabilityZones:
+    Description: >-
+      Choose up to three Availability Zones to use for the VPC subnets.
+    Type: "List<AWS::EC2::AvailabilityZone::Name>"
+  NumberOfAZs:
+    AllowedValues:
+      - '2'
+      - '3'
+    Default: '2'
+    Description: >-
+      Choose the number of Availability Zones to use in the VPC. This must match the number of AZs selected in the *Availability Zones* parameter.
+    Type: String
+  KeyPairName:
+    Description: Existing key pair to connect to virtual machine (VM) instances.
+    Type: 'AWS::EC2::KeyPair::KeyName'
+  MultiNode:
+    Description: Install Automation Suite on a Single Node (recommended for evaluation/dev purposes) or Multi-node (recommended for production purposes)
+    Type: String
+    Default: 'Single Node'
+    AllowedValues:
+      - "Single Node"
+      - "Multi Node"
+  UseLevel7LoadBalancer:
+    Description: Select either an Application Load Balancer (ALB) or a Network Load Balancer (NLB)
+    Type: String
+    Default: 'ALB'
+    AllowedValues:
+      - 'ALB'
+      - 'NLB'
+  UiPathVersion:
+    Description: UiPath version to install
+    Type: String
+    Default: '2021.10.4'
+    AllowedValues:
+      - '2021.10.4'
+  ServiceProfile:
+    Description: >-
+      Choose Default platform to install Orchestrator, Action Center, Test Manager, Insights, Automation Hub, Automation Ops.
+      Choose Entire platform to additionally install Apps, AI Center, Task Mining, Document Understanding.
+    Type: String
+    Default: 'Default platform'
+    AllowedValues:
+      - 'Default platform'
+      - 'Entire platform'
+  AddGpu:
+    Description: >-
+      Choose true to add a GPU enabled VM to the deployment.
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  HostedZoneID:
+    Description: ID of Route 53 hosted zone.
+    Type: AWS::Route53::HostedZone::Id
+  UiPathFQDN:
+    Description: >-
+      Fully qualified domain name (FQDN) for Automation Suite.
+      This must be either a subdomain, or root domain, of the of ID of Route 53 hosted zone parameter.
+    Type: String
+    AllowedPattern: '(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{0,62}[a-zA-Z0-9]\.)+[a-zA-Z]{2,63}$)'
+    ConstraintDescription: >-
+      Fully qualified domain names can include numbers, lowercase letters, uppercase letters and hyphens (-).
+  QSS3BucketName:
+    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+    ConstraintDescription: >-
+      Quick Start bucket name can include numbers, lowercase letters, uppercase
+      letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Description: Name of the S3 bucket for your copy of the Quick Start assets. Do not modify.
+    Type: String
+    Default: uipath-s3-quickstart
+  QSS3BucketRegion:
+    Default: us-east-1
+    Description: >-
+      AWS Region where the Quick Start S3 bucket (QSS3BucketName) is hosted. Do not modify.
+    Type: String
+    AllowedPattern: (us(-gov)?|ap|ca|cn|eu|sa)-(central|(north|south)?(east|west)?)-\d
+    ConstraintDescription: Must be a valid AWS Region code.
+  QSS3KeyPrefix:
+    AllowedPattern: '^[0-9a-zA-Z-/]*/$'
+    ConstraintDescription: >-
+      The Quick Start S3 key prefix can include numbers, lowercase letters,
+      uppercase letters, hyphens (-), and forward slashes (/).
+    Default: aws-quickstart-sf/
+    Description: >-
+      S3 key prefix that is used to simulate a directory for your copy of the
+      Quick Start assets. Do not modify.
+    Type: String
+  AcceptLicenseAgreement:
+    Description: >-
+      Use of paid UiPath products and services is subject to the licensing agreement executed between you and UiPath.
+      Unless otherwise indicated by UiPath, use of free UiPath products is subject to the associated licensing agreement available here: https://www.uipath.com/legal/trust-and-security/legal-terms (or successor website).
+      Type true in the text input field to confirm that you agree to the applicable licensing agreement.
+    Type: String
+    AllowedPattern: ^true$
+    ConstraintDescription: >-
+      In order to continue you must accept the License Agreement.
+Conditions:
+  UsingDefaultBucket: !Equals
+    - !Ref QSS3BucketName
+    - uipath-s3-quickstart
+  3AZCondition: !Equals
+    - !Ref NumberOfAZs
+    - '3'
+  IsExtendedPlatform: !Equals
+    - !Ref ServiceProfile
+    - 'Entire platform'
+Resources:
+  NetworkStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}submodules/quickstart-aws-vpc/templates/aws-vpc.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        AvailabilityZones: !Join
+          - ','
+          - !Ref AvailabilityZones
+        NumberOfAZs: !Ref NumberOfAZs
+        VPCCIDR: "10.0.0.0/16"
+  ServiceFabricStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/uipath-sf.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        VPCCIDR: "10.0.0.0/16"
+        VPCID: !GetAtt NetworkStack.Outputs.VPCID
+        KeyPairName: !Ref KeyPairName
+        PrivateSubnetIDs: !Join
+          - ','
+          - - !GetAtt NetworkStack.Outputs.PrivateSubnet1AID
+            - !GetAtt NetworkStack.Outputs.PrivateSubnet2AID
+            - !If [3AZCondition, !GetAtt NetworkStack.Outputs.PrivateSubnet3AID, !Ref "AWS::NoValue"]
+        PublicSubnetIDs: !Join
+          - ','
+          - - !GetAtt NetworkStack.Outputs.PublicSubnet1ID
+            - !GetAtt NetworkStack.Outputs.PublicSubnet2ID
+            - !If [3AZCondition, !GetAtt NetworkStack.Outputs.PublicSubnet3ID, !Ref "AWS::NoValue"]
+        NumberOfAZs: !Ref NumberOfAZs
+        MultiNode: !Ref MultiNode
+        EnableBackup: "true"
+        UseLevel7LoadBalancer: !Ref UseLevel7LoadBalancer
+        PerformInstallation: "true"
+        AddGpu: !Ref AddGpu
+        UiPathFQDN: !Ref UiPathFQDN
+        ActionCenter: "true"
+        AutomationHub: "true"
+        AutomationOps: "true"
+        Insights: "true"
+        TestManager: "true"
+        AiCenter: !If [IsExtendedPlatform, "true", "false"]
+        BusinessApps: !If [IsExtendedPlatform, "true", "false"]
+        DocumentUnderstanding: !If [IsExtendedPlatform, "true", "false"]
+        TaskMining: !If [IsExtendedPlatform, "true", "false"]
+        HostedZoneID: !Ref HostedZoneID
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+        QSS3BucketRegion: !Ref QSS3BucketRegion
+        UiPathVersion: !Ref UiPathVersion
+        AcceptLicenseAgreement: !Ref AcceptLicenseAgreement
+
+Outputs:
+  InterfaceTour:
+    Value: "https://docs.uipath.com/automation-suite/docs/interface-tour"
+    Description: |-
+      The general-use Automation Suite user interface serves as a portal for both organization administrators and organization users.
+      It is a common organization-level resource from where everyone can access all of your Automation Suite areas: administration pages,
+      platform-level pages, service-specific pages, and user-specific pages.
+  AutomationSuiteUrl:
+    Description: Automation Suite Portal
+    Value: !Sub "https://${UiPathFQDN}"
+  AutomationSuiteSecret:
+    Description: Credentials for Automation Suite Portal
+    Value: !Join
+      - ''
+      - - !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/home?region=${AWS::Region}#!/secret?name="
+        - !GetAtt ServiceFabricStack.Outputs.OrgSecret
+  HostAdministrationUrl:
+    Description: |-
+      The host portal is for system administrators to configure the Automation Suite instance.
+      The settings that you configure from this portal are inherited by all your organizations, and some can be overwritten at the organization level.
+    Value: !Sub "https://${UiPathFQDN}"
+  HostAdministrationSecret:
+    Description: Credentials for Host Administration
+    Value: !Join
+      - ''
+      - - !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/home?region=${AWS::Region}#!/secret?name="
+        - !GetAtt ServiceFabricStack.Outputs.PlatformSecret
+  ArgoCd:
+    Description: |-
+      You can use the ArgoCD console to manage installed products.
+    Value: !Sub "https://alm.${UiPathFQDN}"
+  ArgoCdSecret:
+    Description: Secret storing the ArgoCD admin credentials
+    Value: !Join
+      - ''
+      - - !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/home?region=${AWS::Region}#!/secret?name="
+        - !GetAtt ServiceFabricStack.Outputs.ArgoCdSecret
+  MonitoringFqdn:
+    Description: The Monitoring login page
+    Value: !Sub "https://monitoring.${UiPathFQDN}"
+  InputJsonSecret:
+    Description: Secret storing the input.json content.
+    Value: !Join
+      - ''
+      - - !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/home?region=${AWS::Region}#!/secret?name="
+        - !GetAtt ServiceFabricStack.Outputs.InputJsonSecret

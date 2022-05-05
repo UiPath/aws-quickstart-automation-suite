@@ -1,0 +1,863 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This template creates a Multi-AZ, multi-subnet VPC infrastructure with UIPath
+  Automation Suite deployed in private subnets, with a Load Balancer behind Route 53 in
+  public subnets. (qs-1r2g4122s)
+Metadata:
+  UnusedParameter: !Ref AcceptLicenseAgreement
+  QuickStartDocumentation:
+    EntrypointName: Launch into a new VPC
+    Order: "1"
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: Network configuration
+        Parameters:
+          - VPCCIDR
+          - VPCID
+          - NumberOfAZs
+          - PublicSubnetIDs
+          - PrivateSubnetIDs
+          - DeployBastion
+      - Label:
+          default: Automation Suite instance configuration
+        Parameters:
+          - KeyPairName
+          - AmiId
+          - GpuAmiId
+          - IamRoleArn
+          - IamRoleName
+      - Label:
+          default: Automation Suite deployment configuration
+        Parameters:
+          - MultiNode
+          - EnableBackup
+          - UseLevel7LoadBalancer
+          - PerformInstallation
+          - UiPathVersion
+          - InstallerDownloadUrl
+          - AddGpu
+          - ExtraConfigKeys
+          - SelfSignedCertificateValidity
+      - Label:
+          default: Automation Suite services
+        Parameters:
+          - ActionCenter
+          - AutomationHub
+          - AutomationOps
+          - Insights
+          - TestManager
+          - AiCenter
+          - BusinessApps
+          - DocumentUnderstanding
+          - TaskMining
+      - Label:
+          default: DNS or SSL configuration
+        Parameters:
+          - UiPathFQDN
+          - HostedZoneID
+          - AcmCertificateArn
+          - UseInternalLoadBalancer
+      - Label:
+          default: RDS configuration
+        Parameters:
+          - RDSEngine
+          - RDSVersion
+          - DatabaseKmsKeyId
+      - Label:
+          default: Quick Start S3 bucket configuration
+        Parameters:
+          - QSS3BucketName
+          - QSS3KeyPrefix
+          - QSS3BucketRegion
+    ParameterLabels:
+      VPCCIDR:
+        default: VPC CIDR
+      VPCID:
+        default: VPC ID
+      NumberOfAZs:
+        default: Number of Availability Zones
+      PublicSubnetIDs:
+        default: Public Subnets IDs
+      PrivateSubnetIDs:
+        default: Private Subnets IDs
+      DeployBastion:
+        default: Deploy Bastion host
+      KeyPairName:
+        default: Instance key pair
+      AmiId:
+        default: Instance AMI id
+      GpuAmiId:
+        default: GPU instance AMI id
+      IamRoleArn:
+        default: IAM Role ARN
+      IamRoleName:
+        default: IAM Role name
+      MultiNode:
+        default: Deployment type
+      EnableBackup:
+        default: Enable cluster backup
+      UseLevel7LoadBalancer:
+        default: Load Balancer
+      PerformInstallation:
+        default: Perform Installation
+      UiPathVersion:
+        default: Automation Suite version
+      InstallerDownloadUrl:
+        default: Installer download URL
+      ExtraConfigKeys:
+        default: Extra configuration keys
+      SelfSignedCertificateValidity:
+        default: Validity of the self signed certificate
+      ActionCenter:
+        default: Action Center
+      AutomationHub:
+        default: Automation Hub
+      AutomationOps:
+        default: Automation Ops
+      Insights:
+        default: Insights
+      TestManager:
+        default: Test Manager
+      AiCenter:
+        default: AI Center
+      BusinessApps:
+        default: Apps
+      DocumentUnderstanding:
+        default: Document Understanding
+      TaskMining:
+        default: Task Mining
+      AddGpu:
+        default: Add GPU enabled VMs
+      UiPathFQDN:
+        default: Hosting FQDN
+      HostedZoneID:
+        default: ID of Route 53 hosted zone
+      UseInternalLoadBalancer:
+        default: Use Internal Load Balancer
+      RDSEngine:
+        default: Engine of SQL Server deployed on RDS
+      RDSVersion:
+        default: Version of SQL Server deployed on RDS
+      DatabaseKmsKeyId:
+        default: KMS Key Id used to encrypt RDS storage
+      AcmCertificateArn:
+        default: ARN of the ACM hosted certificate to use
+      QSS3BucketName:
+        default: Template-hosting S3 bucket
+      QSS3KeyPrefix:
+        default: Template folder
+      QSS3BucketRegion:
+        default: Template-hosting S3 region
+Parameters:
+  VPCCIDR:
+    AllowedPattern: '^([0-9]{1,3}\.){2}([0]{1}.)[0]{1}(\/[16]{2})$'
+    ConstraintDescription: Must be in format x.x.0.0/16.
+    Default: 10.0.0.0/16
+    Description: VPC CIDR block, in format x.x.0.0/16.
+    Type: String
+  VPCID:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: VPC ID
+  PublicSubnetIDs:
+    Description: |
+      List of public subnet IDs to deploy the internet-facing Load Balancer and the Bastion host.
+      Leave empty to deploy internal Load Balancer and skip the deployment of the Bastion host.
+    Type: CommaDelimitedList
+    Default: ''
+  PrivateSubnetIDs:
+    Description: List of private subnet IDs.
+    Type: CommaDelimitedList
+  NumberOfAZs:
+    AllowedValues:
+      - '2'
+      - '3'
+    Default: '2'
+    Description: >-
+      Choose the number of Availability Zones to use in the VPC. This must match the number of AZs selected in the *Availability Zones* parameter.
+    Type: String
+  KeyPairName:
+    Description: Existing key pair to connect to virtual machine (VM) instances.
+    Type: 'AWS::EC2::KeyPair::KeyName'
+  AmiId:
+    Description: |
+      Enter the AMI Id to be used for the creation of the EC2 instances of the cluster.
+      Leave empty to determine automatically the AMI to use.
+    Type: String
+    Default: ''
+  GpuAmiId:
+    Description: |
+      Enter the AMI Id to be used for the creation of the GPU enabled EC2 instance.
+      Leave empty to determine automatically the AMI to use.
+    Type: String
+    Default: ''
+  IamRoleArn:
+    Description: ARN of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Type: String
+    Default: ''
+  IamRoleName:
+    Description: Name of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Type: String
+    Default: ''
+  MultiNode:
+    Description: Install Automation Suite on a Single Node (recommended for evaluation/dev purposes) or Multi-node (recommended for production purposes)
+    Type: String
+    Default: 'Single Node'
+    AllowedValues:
+      - "Single Node"
+      - "Multi Node"
+  EnableBackup:
+    Description: Choose false to disable cluster backup.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  UseLevel7LoadBalancer:
+    Description: Select either an Application Load Balancer (ALB) or a Network Load Balancer (NLB)
+    Type: String
+    Default: 'ALB'
+    AllowedValues:
+      - 'ALB'
+      - 'NLB'
+  PerformInstallation:
+    Description: |
+      Perform the Automation Suite installation.
+      Choose false to perform only infrastructure provisioning and configuration.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  UiPathVersion:
+    Description: UiPath version to install
+    Type: String
+    Default: '2021.10.4'
+    AllowedValues:
+      - '2021.10.4'
+  InstallerDownloadUrl:
+    Description: Custom URL for installer download. Leave empty to use the UiPathVersion, provide an URL to override the version.
+    Type: String
+    Default: ""
+  ExtraConfigKeys:
+    Description: Extra configuration keys to add to the cluster config. Leave empty to use default config.
+    Type: String
+    Default: ""
+  SelfSignedCertificateValidity:
+    Description: Validity of the self signed certificate in days, used by the deployment to encrypt traffic inside the VPC.
+    Type: String
+    Default: "1825"
+    AllowedValues:
+      - "90"
+      - "365"
+      - "730"
+      - "1825"
+      - "3650"
+  ActionCenter:
+    Description: Choose false to disable Action Center installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  Insights:
+    Description: Choose false to disable Insights installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AutomationHub:
+    Description: Choose false to disable Automation Hub installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AutomationOps:
+    Description: Choose false to disable Automation Ops installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  TestManager:
+    Description: Choose false to disable Test Manager installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AiCenter:
+    Description: Choose false to disable AI Center installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  BusinessApps:
+    Description: Choose false to disable Apps installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DocumentUnderstanding:
+    Description: Choose false to disable Document Understanding installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  TaskMining:
+    Description: Choose false to disable Task Mining installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AddGpu:
+    Description: >-
+      Choose true to add a GPU enabled VM to the deployment.
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  HostedZoneID:
+    Description: ID of Route 53 hosted zone.
+    Type: AWS::Route53::HostedZone::Id
+  UiPathFQDN:
+    Description: >-
+      Fully qualified domain name (FQDN) for Automation Suite.
+      This must be either a subdomain, or root domain, of the of ID of Route 53 hosted zone parameter.
+    Type: String
+    AllowedPattern: '(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{0,62}[a-zA-Z0-9]\.)+[a-zA-Z]{2,63}$)'
+    ConstraintDescription: >-
+      Fully qualified domain names can include numbers, lowercase letters, uppercase letters and hyphens (-).
+  AcmCertificateArn:
+    Description: |
+      ARN of certificate present in the ACM (Amazon Certificate Manager) to use with the ALB.
+      Leave empty to create the public certificate during deployment.
+    Type: String
+    Default: ""
+  UseInternalLoadBalancer:
+    Description: Deploy Internal Load Balancer
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DeployBastion:
+    Description: |
+      Deploy a bastion host inside the public subnet.
+      Choose false to skip deploying the Bastion.
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - 'true'
+      - 'false'
+  RDSEngine:
+    Type: String
+    Description: RDS MS SQL engine
+    Default: "sqlserver-se"
+    AllowedValues:
+      - "sqlserver-ee"
+      - "sqlserver-se"
+      - "sqlserver-web"
+  RDSVersion:
+    Type: String
+    Description: RDS MS SQL version
+    Default: "15.00"
+    AllowedValues:
+      - "15.00"
+      - "14.00"
+      - "13.00"
+  DatabaseKmsKeyId:
+    Type: String
+    Default: ""
+    Description: KMS Key Id to use for the encryption of the RDS storage. Leave empty to not encrypt the RDS storage
+  QSS3BucketName:
+    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+    ConstraintDescription: >-
+      Quick Start bucket name can include numbers, lowercase letters, uppercase
+      letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Description: Name of the S3 bucket for your copy of the Quick Start assets. Do not modify.
+    Type: String
+    Default: uipath-s3-quickstart
+  QSS3BucketRegion:
+    Default: us-east-1
+    Description: >-
+      AWS Region where the Quick Start S3 bucket (QSS3BucketName) is hosted. Do not modify.
+    Type: String
+    AllowedPattern: (us(-gov)?|ap|ca|cn|eu|sa)-(central|(north|south)?(east|west)?)-\d
+    ConstraintDescription: Must be a valid AWS Region code.
+  QSS3KeyPrefix:
+    AllowedPattern: '^[0-9a-zA-Z-/]*/$'
+    ConstraintDescription: >-
+      The Quick Start S3 key prefix can include numbers, lowercase letters,
+      uppercase letters, hyphens (-), and forward slashes (/).
+    Default: aws-quickstart-sf/
+    Description: >-
+      S3 key prefix that is used to simulate a directory for your copy of the
+      Quick Start assets. Do not modify.
+    Type: String
+  AcceptLicenseAgreement:
+    Description: >-
+      Use of paid UiPath products and services is subject to the licensing agreement executed between you and UiPath.
+      Unless otherwise indicated by UiPath, use of free UiPath products is subject to the associated licensing agreement available here: https://www.uipath.com/legal/trust-and-security/legal-terms (or successor website).
+      Type true in the text input field to confirm that you agree to the applicable licensing agreement.
+    Type: String
+    AllowedPattern: ^true$
+    ConstraintDescription: >-
+      In order to continue you must accept the License Agreement.
+Conditions:
+  UsingDefaultBucket: !Equals
+    - !Ref QSS3BucketName
+    - uipath-s3-quickstart
+  UsingAlb: !Equals
+    - !Ref UseLevel7LoadBalancer
+    - "ALB"
+  UsingExistingSslCertificate: !Not [!Equals [!Ref AcmCertificateArn, ""]]
+  GenerateSslCertificate: !And
+    - !Not [!Condition UsingExistingSslCertificate]
+    - !Condition UsingAlb
+  DeployIam: !Or
+    - !Equals ["", !Ref IamRoleArn]
+    - !Equals ["", !Ref IamRoleName]
+  IsMultiNode: !Equals
+    - !Ref MultiNode
+    - "Multi Node"
+  UsingCustomUrl: !Not [!Equals [!Ref InstallerDownloadUrl, '']]
+  IsBackupEnabled: !Equals [ !Ref EnableBackup, "true" ]
+Resources:
+  FindAmiLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Condition: DeployIam
+    Properties:
+      Description: >-
+        IAM Role to be assumed by Lambda functions which find AMI ids
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ec2:DescribeImages'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:${AWS::Partition}:logs:*:*:*'
+              - Effect: Allow
+                Action:
+                  - 'xray:PutTraceSegments'
+                Resource: '*'
+  FindAMIFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: Finds a matching AMI Id
+      Handler: lambda_function.handler
+      Role: !If [DeployIam, !GetAtt FindAmiLambdaRole.Arn, !Ref IamRoleArn]
+      Code:
+        S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+        S3Key: !Sub '${QSS3KeyPrefix}functions/packages/FindAmi/lambda.zip'
+      Runtime: python3.6
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+  RDSPassword:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Description: Password for the SF RDS instance.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: "password"
+        PasswordLength: 30
+        ExcludePunctuation: true
+  OrgSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Description: Org secret
+      SecretString: '{}'
+  PlatformSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Description: Password for the SF platform.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: "password"
+        PasswordLength: 30
+        ExcludePunctuation: true
+  ArgoCdSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Description: Password for ArgoCd.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: "password"
+        PasswordLength: 30
+        ExcludePunctuation: true
+
+  RoutingStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/routing.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        VPCID: !Ref VPCID
+        VPCCIDR: !Ref VPCCIDR
+        PublicSubnetIDs: !Join [",", !Ref PublicSubnetIDs]
+        PrivateSubnetIDs: !Join [",", !Ref PrivateSubnetIDs]
+        Fqdn: !Ref UiPathFQDN
+        HostedZoneID: !Ref HostedZoneID
+        SSLCertificateArn: !If [UsingAlb, !If [GenerateSslCertificate, !GetAtt ConfigureSSLStack.Outputs.ACMCertificate, !Ref AcmCertificateArn], ""]
+        UseLevel7LoadBalancer: !Ref UseLevel7LoadBalancer
+        UseInternalLoadBalancer: !Ref UseInternalLoadBalancer
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3BucketRegion: !Ref QSS3BucketRegion
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+
+  ServerStack:
+    Type: 'AWS::CloudFormation::Stack'
+    DependsOn: CreateInputJson
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/server.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        VPCID: !Ref VPCID
+        VPCCIDR: !Ref VPCCIDR
+        PrivateSubnetIDs: !Join [",", !Ref PrivateSubnetIDs]
+        PublicSubnetIDs: !Join [",", !Ref PublicSubnetIDs]
+        DeploymentTargetGroupArn: !GetAtt
+          - RoutingStack
+          - Outputs.DeploymentTargetGroupArn
+        KubeTargetGroupArn: !GetAtt
+          - RoutingStack
+          - Outputs.KubeTargetGroupArn
+        Rke2RegistrationTargetGroupArn: !GetAtt
+          - RoutingStack
+          - Outputs.Rke2RegistrationTargetGroupArn
+        BackupFileSystemDns: !If [ IsBackupEnabled, !GetAtt BackupStack.Outputs.BackupFileSystemDns, "" ]
+        KeyPairName: !Ref KeyPairName
+        AmiId: !Ref AmiId
+        GpuAmiId: !Ref GpuAmiId
+        InstanceType: !GetAtt ComputeResourceSize.InstanceType
+        ServerDiskSize: !GetAtt ComputeResourceSize.ServerDiskSize
+        TmInstanceType: !GetAtt ComputeResourceSize.TmInstanceType
+        GpuInstanceType: !GetAtt ComputeResourceSize.GpuInstanceType
+        ServerInstanceCount: !GetAtt ComputeResourceSize.ServerInstanceCount
+        AgentInstanceCount: !GetAtt ComputeResourceSize.AgentInstanceCount
+        MultiNode: !Ref MultiNode
+        PerformInstallation: !Ref PerformInstallation
+        FindAMIFunctionArn: !GetAtt
+          - FindAMIFunction
+          - Arn
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3BucketRegion: !Ref QSS3BucketRegion
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+        InputJsonSecretArn: !Ref InputJsonSecret
+        KubeconfigSecretArn: !Ref KubeconfigSecret
+        TaskMining: !Ref TaskMining
+        AddGpu: !Ref AddGpu
+        DeployBastion: !Ref DeployBastion
+        InstallerDownloadUrl: !If [UsingCustomUrl, !Ref InstallerDownloadUrl, !Sub "https://download.uipath.com/automation-suite/${UiPathVersion}/installer-${UiPathVersion}.zip"]
+
+
+  ConfigureSSLStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: GenerateSslCertificate
+    Properties:
+      TemplateURL: !Sub
+        - "https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}submodules/quickstart-aws-acm-certificate/templates/quickstart-aws-acm-certificate.template.yml"
+        - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+          S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      Parameters:
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3BucketRegion: !Ref QSS3BucketRegion
+        QSS3KeyPrefix: !Sub "${QSS3KeyPrefix}submodules/quickstart-aws-acm-certificate/"
+        DomainName: !Ref UiPathFQDN
+        HostedZoneID: !Ref HostedZoneID
+        IamRoleArn: !Ref IamRoleArn
+
+  DatabaseStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/database.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        VPCID: !Ref VPCID
+        VPCCIDR: !Ref VPCCIDR
+        SubnetIDs: !Join [",", !Ref PrivateSubnetIDs]
+        RDSPasswordSecretArn: !Ref RDSPassword
+        MultiAZ: !If [IsMultiNode, "true", "false"]
+        RDSEngine: !Ref RDSEngine
+        RDSVersion: !Ref RDSVersion
+        KmsKeyId: !Ref DatabaseKmsKeyId
+
+  BackupStack:
+    Condition: IsBackupEnabled
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/backup.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        VPCID: !Ref VPCID
+        VPCCIDR: !Ref VPCCIDR
+        PrivateSubnetIDs: !Join [",", !Ref PrivateSubnetIDs]
+        NumberOfAZs: !Ref NumberOfAZs
+
+  CreateInputJsonLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Condition: DeployIam
+    Properties:
+      Description: >-
+        IAM Role to be assumed by Lambda functions which find AMI ids
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - "secretsmanager:GetSecretValue"
+                  - "secretsmanager:PutSecretValue"
+                Resource:
+                  - !Ref InputJsonSecret
+                  - !Ref PlatformSecret
+                  - !Ref RDSPassword
+                  - !Ref OrgSecret
+                  - !Ref ArgoCdSecret
+                Effect: Allow
+              - Effect: Allow
+                Action:
+                  - 'autoscaling:DescribeAutoScalingGroups'
+                  - 'autoscaling:DescribeAutoScalingInstances'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:${AWS::Partition}:logs:*:*:*'
+              - Effect: Allow
+                Action:
+                  - 'xray:PutTraceSegments'
+                Resource: '*'
+              - Action:
+                  - ec2:DescribeImages
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeInstanceTypeOfferings
+                Resource:
+                  - "*"
+                Effect: Allow
+
+  CreateInputJsonFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: Create input json file
+      Handler: lambda_function.handler
+      Role: !If [DeployIam, !GetAtt CreateInputJsonLambdaRole.Arn, !Ref IamRoleArn]
+      Code:
+        S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+        S3Key: !Sub '${QSS3KeyPrefix}functions/packages/CreateInputJson/lambda.zip'
+      Runtime: python3.6
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+
+  CreateInputJson:
+    Type: 'Custom::CreateInputJson'
+    Properties:
+      ServiceToken: !GetAtt CreateInputJsonFunction.Arn
+      RegionName: !Ref 'AWS::Region'
+      TargetSecretArn: !Ref InputJsonSecret
+      RDSPasswordSecretArn: !Ref RDSPassword
+      PlatformSecretArn: !Ref PlatformSecret
+      OrgSecretArn: !Ref OrgSecret
+      ArgoCdSecretArn: !Ref ArgoCdSecret
+      Fqdn: !Ref UiPathFQDN
+      RDSDBInstanceEndpointAddress: !GetAtt
+        - DatabaseStack
+        - Outputs.RDSDBInstanceEndpointAddress
+      MultiNode: !Ref MultiNode
+      KubeLoadBalancerDns: !GetAtt
+        - RoutingStack
+        - Outputs.KubeLoadBalancerDns
+      ActionCenter: !Ref ActionCenter
+      AutomationHub: !Ref AutomationHub
+      AutomationOps: !Ref AutomationOps
+      Insights: !Ref Insights
+      TestManager: !Ref TestManager
+      AiCenter: !Ref AiCenter
+      BusinessApps: !Ref BusinessApps
+      DocumentUnderstanding: !Ref DocumentUnderstanding
+      TaskMining: !Ref TaskMining
+      AddGpu: !Ref AddGpu
+      ServerInstanceCount: !GetAtt ComputeResourceSize.ServerInstanceCount
+      AgentInstanceCount: !GetAtt ComputeResourceSize.AgentInstanceCount
+      PrivateSubnetIDs: !Join [",", !Ref PrivateSubnetIDs]
+      ExtraConfigKeys: !Ref ExtraConfigKeys
+      SelfSignedCertificateValidity: !Ref SelfSignedCertificateValidity
+
+  ComputeResourceSizeLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Condition: DeployIam
+    Properties:
+      Description: >-
+        IAM Role to be assumed by Lambda functions which find AMI ids
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'autoscaling:DescribeAutoScalingGroups'
+                  - 'autoscaling:DescribeAutoScalingInstances'
+                  - 'ec2:DescribeInstances'
+                  - 'ec2:DescribeInstanceTypeOfferings'
+                  - 'ec2:DescribeInstanceTypes'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:${AWS::Partition}:logs:*:*:*'
+              - Effect: Allow
+                Action:
+                  - 'xray:PutTraceSegments'
+                Resource: '*'
+
+  ComputeResourceSizeFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: Create input json file
+      Handler: lambda_function.handler
+      Role: !If [DeployIam, !GetAtt ComputeResourceSizeLambdaRole.Arn, !Ref IamRoleArn]
+      Code:
+        S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+        S3Key: !Sub '${QSS3KeyPrefix}functions/packages/ComputeResourceSize/lambda.zip'
+      Runtime: python3.6
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+
+  ComputeResourceSize:
+    Type: 'Custom::ComputeResourceSize'
+    Properties:
+      ServiceToken: !GetAtt ComputeResourceSizeFunction.Arn
+      RegionName: !Ref 'AWS::Region'
+      MultiNode: !Ref MultiNode
+      ActionCenter: !Ref ActionCenter
+      AutomationHub: !Ref AutomationHub
+      AutomationOps: !Ref AutomationOps
+      Insights: !Ref Insights
+      TestManager: !Ref TestManager
+      AiCenter: !Ref AiCenter
+      BusinessApps: !Ref BusinessApps
+      DocumentUnderstanding: !Ref DocumentUnderstanding
+      TaskMining: !Ref TaskMining
+      AddGpu: !Ref AddGpu
+
+  InputJsonSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Description: Input Json file for the deployment
+      SecretString: '{}'
+
+  KubeconfigSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Description: The deployment kubeconfig file
+      SecretString: '{}'
+
+
+Outputs:
+  FQDNLoadBalancer:
+    Description: UiPath Service Fabric login page.
+    Value: !Sub "https://${UiPathFQDN}"
+  Postdeployment:
+    Description: See the deployment guide for post-deployment steps.
+    Value: https://aws.amazon.com/quickstart/?quickstart-all.sort-by=item.additionalFields.sortDate&quickstart-all.sort-order=desc&awsm.page-quickstart-all=5
+  InputJsonSecret:
+    Description: Secret storing the input.json content.
+    Value: !Ref InputJsonSecret
+  PlatformSecret:
+    Description: Secret storing the platform host tenant credentials.
+    Value: !Ref PlatformSecret
+  ArgoCdSecret:
+    Description: Secret storing the ArgoCD admin credentials.
+    Value: !Ref ArgoCdSecret
+  OrgSecret:
+    Description: Secret storing the org admin credentials.
+    Value: !Ref OrgSecret

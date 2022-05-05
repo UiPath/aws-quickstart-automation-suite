@@ -1,0 +1,51 @@
+[
+  {
+    "ParameterKey": "VPCCIDR",
+    "ParameterValue": "10.0.0.0/16"
+  },
+  {
+    "ParameterKey": "VPCID",
+    "ParameterValue": "vpc-1234567890a"
+  },
+  {
+    "ParameterKey": "PrivateSubnetIDs",
+    "ParameterValue": "subnet-1234567890a,subnet-1234567890b,subnet-1234567890c"
+  },
+  {
+    "ParameterKey": "PublicSubnetIDs",
+    "ParameterValue": "subnet-1234567890d,subnet-1234567890e,subnet-1234567890f"
+  },
+  {
+    "ParameterKey": "MultiNode",
+    "ParameterValue": "Multi Node"
+  },
+  {
+    "ParameterKey": "KeyPairName",
+    "ParameterValue": "my-key-pair-name"
+  },
+  {
+    "ParameterKey": "UiPathFQDN",
+    "ParameterValue": "multi-node-existing-vpc.my-fqdn.io"
+  },
+  {
+    "ParameterKey": "HostedZoneID",
+    "ParameterValue": "A1234567890"
+  },
+  {
+    "ParameterKey": "ActionCenter",
+    "ParameterValue": "false"
+  },
+  {
+    "ParameterKey": "AutomationHub",
+    "ParameterValue": "false"
+  },
+  {
+    "ParameterKey": "TaskMining",
+    "ParameterValue": "false"
+  },
+  {
+    "ParameterKey": "AcceptLicenseAgreement",
+    "ParameterValue": "true"
+  }
+]
+  

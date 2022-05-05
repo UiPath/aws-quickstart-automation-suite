@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates a RDS SQL instance in private subnet. (qs-1r2g4124k)
+Parameters:
+  SubnetIDs:
+    Description: Comma separated Subnet IDs where Gateway VMs need to be launched
+    Type: List<AWS::EC2::Subnet::Id>
+  VPCID:
+    Type: 'AWS::EC2::VPC::Id'
+  VPCCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+  RDSPasswordSecretArn:
+    Description: RDS DB password secret ARN
+    Type: String
+  MultiAZ:
+    Description: RDS instance deployment multi AZ availability
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+  RDSEngine:
+    Type: String
+    Description: RDS MS SQL engine
+    Default: "sqlserver-se"
+    AllowedValues:
+      - "sqlserver-ee"
+      - "sqlserver-se"
+      - "sqlserver-web"
+  RDSVersion:
+    Type: String
+    Description: RDS MS SQL version
+    Default: "15.00"
+    AllowedValues:
+      - "15.00"
+      - "14.00"
+      - "13.00"
+  KmsKeyId:
+    Type: String
+    Default: ""
+    Description: KMS key id to use for database storage encryption
+Conditions:
+  UsingKmsKeyId: !Not [!Equals [!Ref KmsKeyId, '']]
+Resources:
+  DbSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security Group allowing access to the DB instance
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 1433
+          ToPort: 1433
+          CidrIp: !Ref VPCCIDR
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: RDS-MSSQL private subnet group
+      SubnetIds: !Ref SubnetIDs
+  RDSDBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      AllocatedStorage: '256'
+      MaxAllocatedStorage: 1000
+      BackupRetentionPeriod: 5
+      DBInstanceClass: db.m5.2xlarge
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: !Ref RDSEngine
+      EngineVersion: !Ref RDSVersion
+      PubliclyAccessible: false
+      StorageEncrypted: !If [UsingKmsKeyId, true, false]
+      KmsKeyId: !If [UsingKmsKeyId, !Ref KmsKeyId, !Ref "AWS::NoValue"]
+      LicenseModel: license-included
+      MasterUsername: !Sub '{{resolve:secretsmanager:${RDSPasswordSecretArn}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSPasswordSecretArn}:SecretString:password}}'
+      MultiAZ: !Ref MultiAZ
+      StorageType: gp2
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroup
+Outputs:
+  DBSubnetGroup:
+    Value: !Ref DBSubnetGroup
+    Description: RDS-MSSQL private subnet group
+  RDSDBInstanceID:
+    Value: !Ref RDSDBInstance
+    Description: RDS-MSSQL Database Instance ID
+  RDSDBInstanceEndpointAddress:
+    Value: !GetAtt
+      - RDSDBInstance
+      - Endpoint.Address
+    Description: RDS-MSSQL Database Instance Endpoint Address
+  RDSDBInstanceEndpointPort:
+    Value: !GetAtt
+      - RDSDBInstance
+      - Endpoint.Port
+    Description: RDS-MSSQL Database Instance Endpoint Port

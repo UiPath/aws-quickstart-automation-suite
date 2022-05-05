@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This template creates an Route53 Hosted zone and adds related record sets.
+  (qs-1r2g4123h)
+Parameters:
+  VPCID:
+    Type: 'AWS::EC2::VPC::Id'
+  SubnetIDs:
+    Description: Comma separated Subnet IDs where Gateway VMs need to be launched
+    Type: List<AWS::EC2::Subnet::Id>
+  UseInternalLoadBalancer:
+    Description: Deploy Internal Load Balancer
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - 'true'
+      - 'false'
+Conditions:
+  UsingInternalLoadBalancer: !Equals [!Ref UseInternalLoadBalancer, 'true']
+Resources:
+  ExternalLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Type: network
+      Scheme: !If [UsingInternalLoadBalancer , "internal", "internet-facing"]
+      Subnets: !Ref SubnetIDs
+  TcpTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Port: 443
+      Protocol: TCP
+      VpcId: !Ref VPCID
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'true'
+        - Key: stickiness.type
+          Value: source_ip
+        - Key: preserve_client_ip.enabled
+          Value: 'false'
+      TargetType: instance
+      HealthCheckPort: '443'
+      HealthCheckProtocol: TCP
+  TcpListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 443
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TcpTargetGroup
+Outputs:
+  TcpTargetGroup:
+    Value: !Ref TcpTargetGroup
+    Description: Deployment target group ARN
+
+  ExternalLoadBalancerDns:
+    Value: !GetAtt
+      - ExternalLoadBalancer
+      - DNSName
+    Description: DNS name of the External load balancer
+
+  CanonicalHostedZoneID:
+    Value: !GetAtt
+      - ExternalLoadBalancer
+      - CanonicalHostedZoneID
+    Description: Hosted Zone id of the External load balancer

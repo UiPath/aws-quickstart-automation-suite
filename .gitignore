@@ -1,0 +1,5 @@
+.taskcat
+taskcat_outputs
+.idea
+__pycache__
+.vscode

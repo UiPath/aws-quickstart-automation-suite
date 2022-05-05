@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This template creates an Application Load Balancer (qs-1r2g4122s)
+Parameters:
+  VPCID:
+    Type: 'AWS::EC2::VPC::Id'
+  VPCCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+  SubnetIDs:
+    Description: Comma separated Subnet IDs where Gateway VMs need to be launched
+    Type: List<AWS::EC2::Subnet::Id>
+  SSLCertificateArn:
+    Description: Arn of SSL certificate to use for the HTTPS listener
+    Type: String
+  UseInternalLoadBalancer:
+    Description: Deploy Internal Load Balancer
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - 'true'
+      - 'false'
+Conditions:
+  UsingInternalLoadBalancer: !Equals [!Ref UseInternalLoadBalancer, 'true']
+Resources:
+  ELBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security Group allowing access to High-Availability Add-On application
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VPCCIDR
+          Description: Access to target instance on port 443
+  ExternalLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Type: application
+      Scheme: !If [UsingInternalLoadBalancer , "internal", "internet-facing"]
+      SecurityGroups:
+        - !Ref ELBSecurityGroup
+      Subnets: !Ref SubnetIDs
+  HttpsTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Port: 443
+      Protocol: HTTPS
+      VpcId: !Ref VPCID
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'true'
+        - Key: stickiness.type
+          Value: lb_cookie
+      TargetType: instance
+      HealthCheckPath: /
+      HealthCheckPort: '443'
+      HealthCheckProtocol: HTTPS
+      Matcher:
+        HttpCode: "200-499"
+  HttpsListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref HttpsTargetGroup
+      SslPolicy: ELBSecurityPolicy-2016-08
+      Certificates:
+        - CertificateArn: !Ref SSLCertificateArn
+
+Outputs:
+  TcpTargetGroup:
+    Value: !Ref HttpsTargetGroup
+    Description: Deployment target group ARN
+
+  ExternalLoadBalancerDns:
+    Value: !GetAtt
+      - ExternalLoadBalancer
+      - DNSName
+    Description: DNS name of the External load balancer
+
+  CanonicalHostedZoneID:
+    Value: !GetAtt
+      - ExternalLoadBalancer
+      - CanonicalHostedZoneID
+    Description: Hosted Zone id of the External load balancer

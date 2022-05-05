@@ -1,0 +1,259 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This template creates an Route53 Hosted zone and adds related record sets.
+  (qs-1r2g4123h)
+Parameters:
+  VPCID:
+    Type: 'AWS::EC2::VPC::Id'
+  VPCCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+  PublicSubnetIDs:
+    Description: List of public subnet IDs where the Load Balancers is deployed.
+    Type: CommaDelimitedList
+  PrivateSubnetIDs:
+    Description: List of private subnet IDs where the Load Balancer is deployed.
+    Type: CommaDelimitedList
+  Fqdn:
+    Description: The fully qualified domain name where the UiPath Orchestrator should be installed
+    Type: String
+  HostedZoneID:
+    Description: The Route 53 hosted zone Id
+    Type: "String"
+    Default: ''
+  SSLCertificateArn:
+    Description: Arn of SSL certificate to use for the HTTPS listener
+    Type: String
+  UseLevel7LoadBalancer:
+    Type: String
+    AllowedValues:
+      - 'ALB'
+      - 'NLB'
+    Description: Use a level 7 load balancer
+  UseInternalLoadBalancer:
+    Description: Deploy Internal Load Balancer
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - 'true'
+      - 'false'
+  QSS3BucketName:
+    Type: String
+    Description: Name of bucket storing the quickstart files
+  QSS3BucketRegion:
+    Type: String
+    Description: Name of region where the bucket storing the quickstart files is located
+  QSS3KeyPrefix:
+    Type: String
+    Description: Quickstart bucket prefix
+Conditions:
+  UsingDefaultBucket: !Equals
+    - !Ref QSS3BucketName
+    - uipath-s3-quickstart
+  UsingAlb: !Equals
+    - !Ref UseLevel7LoadBalancer
+    - "ALB"
+  UsingNlb: !Not
+    - !Condition UsingAlb
+  NotUsingPublicSubnets: !Equals ['', !Join ["", !Ref PublicSubnetIDs]]
+  UsingInternalLoadBalancer: !Or
+    - !Equals [!Ref UseInternalLoadBalancer, 'true']
+    - !Condition NotUsingPublicSubnets
+  CreatingDnsRecords: !Not [!Equals [!Ref HostedZoneID, '']]
+  NotCreatingDnsRecords: !Not [!Condition CreatingDnsRecords]
+  NotCreatingDnsRecords&&UsingNlb: !And [!Condition NotCreatingDnsRecords, !Condition UsingNlb]
+  NotCreatingDnsRecords&&UsingAlb: !And [!Condition NotCreatingDnsRecords, !Condition UsingAlb]
+Resources:
+  AlbStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: UsingAlb
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/alb.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        VPCCIDR: !Ref VPCCIDR
+        VPCID: !Ref VPCID
+        SubnetIDs: !If [UsingInternalLoadBalancer, !Join [",", !Ref PrivateSubnetIDs], !Join [",", !Ref PublicSubnetIDs]]
+        SSLCertificateArn: !Ref SSLCertificateArn
+        UseInternalLoadBalancer: !If [UsingInternalLoadBalancer, "true", "false"]
+
+  NlbStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: UsingNlb
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/nlb.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        VPCID: !Ref VPCID
+        SubnetIDs: !If [UsingInternalLoadBalancer, !Join [",", !Ref PrivateSubnetIDs], !Join [",", !Ref PublicSubnetIDs]]
+        UseInternalLoadBalancer: !If [UsingInternalLoadBalancer, "true", "false"]
+
+  KubeLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Type: network
+      Scheme: internal
+      Subnets: !Ref PrivateSubnetIDs
+  KubeApiTcpTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Port: 6443
+      Protocol: TCP
+      VpcId: !Ref VPCID
+      TargetGroupAttributes:
+        - Key: preserve_client_ip.enabled
+          Value: 'false'
+        - Key: deregistration_delay.connection_termination.enabled
+          Value: 'true'
+      TargetType: instance
+      HealthCheckPort: '6443'
+      HealthCheckProtocol: TCP
+  KubeApiTcpListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref KubeLoadBalancer
+      Port: 6443
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref KubeApiTcpTargetGroup
+
+  Rke2RegistrationTcpTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Port: 9345
+      Protocol: TCP
+      VpcId: !Ref VPCID
+      TargetGroupAttributes:
+        - Key: preserve_client_ip.enabled
+          Value: 'false'
+        - Key: deregistration_delay.connection_termination.enabled
+          Value: 'true'
+      TargetType: instance
+      HealthCheckPort: '9345'
+      HealthCheckProtocol: TCP
+  Rke2RegistrationTcpListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref KubeLoadBalancer
+      Port: 9345
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref Rke2RegistrationTcpTargetGroup
+
+  RootRecordSet:
+    Type: 'AWS::Route53::RecordSet'
+    Condition: CreatingDnsRecords
+    Properties:
+      HostedZoneId: !Ref HostedZoneID
+      Name: !Join
+        - ''
+        - - "*."
+          - !Ref Fqdn
+      Type: A
+      AliasTarget:
+        EvaluateTargetHealth: false
+        DNSName: !If
+          - UsingAlb
+          - !GetAtt
+            - AlbStack
+            - Outputs.ExternalLoadBalancerDns
+          - !GetAtt
+            - NlbStack
+            - Outputs.ExternalLoadBalancerDns
+        HostedZoneId: !If
+          - UsingAlb
+          - !GetAtt
+            - AlbStack
+            - Outputs.CanonicalHostedZoneID
+          - !GetAtt
+            - NlbStack
+            - Outputs.CanonicalHostedZoneID
+  SubdomainRecordSet:
+    Type: 'AWS::Route53::RecordSet'
+    Condition: CreatingDnsRecords
+    Properties:
+      HostedZoneId: !Ref HostedZoneID
+      Name: !Ref Fqdn
+      Type: A
+      AliasTarget:
+        EvaluateTargetHealth: false
+        DNSName: !If
+          - UsingAlb
+          - !GetAtt
+            - AlbStack
+            - Outputs.ExternalLoadBalancerDns
+          - !GetAtt
+            - NlbStack
+            - Outputs.ExternalLoadBalancerDns
+        HostedZoneId: !If
+          - UsingAlb
+          - !GetAtt
+            - AlbStack
+            - Outputs.CanonicalHostedZoneID
+          - !GetAtt
+            - NlbStack
+            - Outputs.CanonicalHostedZoneID
+
+  NlbWaitHandle:
+    DependsOn: NlbStack
+    Condition: NotCreatingDnsRecords&&UsingNlb
+    Type: "AWS::CloudFormation::WaitConditionHandle"
+  AlbWaitHandle:
+    DependsOn: AlbStack
+    Condition: NotCreatingDnsRecords&&UsingAlb
+    Type: "AWS::CloudFormation::WaitConditionHandle"
+
+  DnsRecordsWaitCondition:
+    Type: "AWS::CloudFormation::WaitCondition"
+    Condition: NotCreatingDnsRecords
+    Properties:
+      Handle: !If [UsingNlb, !Ref NlbWaitHandle , !Ref AlbWaitHandle]
+      Timeout: "43200"
+      Count: 1
+
+Outputs:
+  DeploymentTargetGroupArn:
+    Value: !If
+      - UsingAlb
+      - !GetAtt
+        - AlbStack
+        - Outputs.TcpTargetGroup
+      - !GetAtt
+        - NlbStack
+        - Outputs.TcpTargetGroup
+    Description: Deployment target group ARN
+
+  KubeTargetGroupArn:
+    Value: !Ref KubeApiTcpTargetGroup
+    Description: Kube API target group ARN
+
+  Rke2RegistrationTargetGroupArn:
+    Value: !Ref Rke2RegistrationTcpTargetGroup
+    Description: Rke2 registration address target group ARN
+
+  KubeLoadBalancerArn:
+    Value: !Ref KubeLoadBalancer
+    Description: ARN for the internal load balancer balancing the kube API traffic
+
+  KubeLoadBalancerDns:
+    Value: !GetAtt KubeLoadBalancer.DNSName

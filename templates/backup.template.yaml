@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This template creates a Multi-AZ, EFS file system and mount points (qs-1r2g4122s)
+Parameters:
+  VPCCIDR:
+    AllowedPattern: '^([0-9]{1,3}\.){2}([0]{1}.)[0]{1}(\/[16]{2})$'
+    ConstraintDescription: Must be in format x.x.0.0/16.
+    Default: 10.0.0.0/16
+    Description: VPC CIDR block, in format x.x.0.0/16.
+    Type: String
+  VPCID:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: VPC ID
+  PrivateSubnetIDs:
+    Description: List of private subnet IDs.
+    Type: CommaDelimitedList
+  NumberOfAZs:
+    AllowedValues:
+      - '2'
+      - '3'
+    Default: '2'
+    Description: >-
+      Choose the number of Availability Zones to use in the VPC. This must match the number of AZs selected in the *Availability Zones* parameter.
+    Type: String
+Conditions:
+  3AZCondition: !Equals
+    - !Ref NumberOfAZs
+    - '3'
+Resources:
+  ClusterBackupStorage:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      Encrypted: True
+      FileSystemTags:
+        - Key: Name
+          Value: ClusterSharedStorage
+
+  SharedStorageSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPCID
+      GroupDescription: Allow mounting of EFS volume on NFS port 2049.
+      SecurityGroupIngress:
+        - Description: NFS network connections from the cluster nodes
+          IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !Ref VPCCIDR
+
+  SharedStorageMountTargetOne:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ClusterBackupStorage
+      SubnetId: !Select [ 0, !Ref PrivateSubnetIDs ]
+      SecurityGroups:
+        - !Ref SharedStorageSecurityGroup
+
+  SharedStorageMountTargetTwo:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ClusterBackupStorage
+      SubnetId: !Select [ 1, !Ref PrivateSubnetIDs ]
+      SecurityGroups:
+        - !Ref SharedStorageSecurityGroup
+
+  SharedStorageMountTargetThree:
+    Condition: 3AZCondition
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ClusterBackupStorage
+      SubnetId: !Select [ 2, !Ref PrivateSubnetIDs ]
+      SecurityGroups:
+        - !Ref SharedStorageSecurityGroup
+
+Outputs:
+  BackupFileSystemDns:
+    Description: DNS name of the file system
+    Value: !Sub "${ClusterBackupStorage}.efs.${AWS::Region}.${AWS::URLSuffix}"

@@ -1,0 +1,34 @@
+[
+  {
+    "ParameterKey": "VPCCIDR",
+    "ParameterValue": "10.0.0.0/16"
+  },
+  {
+    "ParameterKey": "VPCID",
+    "ParameterValue": "vpc-1234567890a"
+  },
+  {
+    "ParameterKey": "PrivateSubnetIDs",
+    "ParameterValue": "subnet-1234567890a,subnet-1234567890b,subnet-1234567890c"
+  },
+  {
+    "ParameterKey": "KeyPairName",
+    "ParameterValue": "my-key-pair-name"
+  },
+  {
+    "ParameterKey": "UiPathFQDN",
+    "ParameterValue": "private-hosted-zone.private.my-fqdn.io"
+  },
+  {
+    "ParameterKey": "HostedZoneID",
+    "ParameterValue": "A1234567890"
+  },
+  {
+    "ParameterKey": "AcmCertificateArn",
+    "ParameterValue": "arn:aws:acm:us-east-1:1234567890:certificate/123456-abcd"
+  },
+  {
+    "ParameterKey": "AcceptLicenseAgreement",
+    "ParameterValue": "true"
+  }
+]
