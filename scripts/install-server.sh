@@ -8,7 +8,9 @@ SETUPBACKUP=0
 
 function get_first_server() {
   local instance_id
-  instance_id=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+  local metadata_token
+  metadata_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+  instance_id=$(curl -H "X-aws-ec2-metadata-token: $metadata_token" -s http://169.254.169.254/latest/meta-data/instance-id)
   echo "Local instance id: ${instance_id}"
   asg_name=$(aws autoscaling describe-auto-scaling-instances --instance-ids "${instance_id}" --query 'AutoScalingInstances[*].AutoScalingGroupName' --output text)
   instances=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-name "$asg_name" --query 'AutoScalingGroups[*].Instances[?HealthStatus==`Healthy`].InstanceId' --output text)
@@ -100,7 +102,7 @@ function main() {
     while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
       echo "Trying to install the infra ==== ${try}/${maxtry}"
       try=$((try + 1))
-      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k --accept-license-agreement --skip-pre-reqs && status="ready"
+      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k --accept-license-agreement --skip-pre-reqs --skip-compare-config && status="ready"
     done
 
     [[ "${status}" == "ready" ]] || (echo "Failed to install infra" && exit 1)
@@ -132,7 +134,7 @@ function main() {
     while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
       echo "Trying to install the fabric ==== ${try}/${maxtry}"
       try=$((try + 1))
-      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -f --accept-license-agreement --skip-pre-reqs && status="ready"
+      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -f --accept-license-agreement --skip-pre-reqs --skip-compare-config && status="ready"
     done
 
     [[ "${status}" == "ready" ]] || (echo "Failed to install fabric" && exit 1)
@@ -143,7 +145,7 @@ function main() {
     while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
       echo "Trying to install the services ==== ${try}/${maxtry}"
       try=$((try + 1))
-      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -s --accept-license-agreement --skip-pre-reqs && status="ready"
+      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -s --accept-license-agreement --skip-pre-reqs --skip-compare-config && status="ready"
     done
     [[ "${status}" == "ready" ]] || (echo "Failed to install services" && exit 1)
 

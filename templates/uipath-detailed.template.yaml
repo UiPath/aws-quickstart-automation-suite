@@ -41,6 +41,7 @@ Metadata:
           - AutomationHub
           - AutomationOps
           - Insights
+          - DataService
           - TestManager
           - AiCenter
           - BusinessApps
@@ -106,6 +107,8 @@ Metadata:
         default: Insights
       TestManager:
         default: Test Manager
+      DataService:
+        default: Data Service
       AiCenter:
         default: AI Center
       BusinessApps:
@@ -196,9 +199,9 @@ Parameters:
   UiPathVersion:
     Description: UiPath version to install
     Type: String
-    Default: '2021.10.4'
+    Default: '2022.4.0'
     AllowedValues:
-      - '2021.10.4'
+      - '2022.4.0'
   InstallerDownloadUrl:
     Description: Custom URL for installer download. Leave empty to use the UiPathVersion, provide an URL to override the version.
     Type: String
@@ -247,6 +250,13 @@ Parameters:
       - 'false'
   TestManager:
     Description: Choose false to disable Test Manager installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DataService:
+    Description: Choose false to disable Data Service installation.
     Type: String
     Default: 'true'
     AllowedValues:
@@ -444,6 +454,7 @@ Resources:
         ActionCenter: !Ref ActionCenter
         AutomationHub: !Ref AutomationHub
         AutomationOps: !Ref AutomationOps
+        DataService: !Ref DataService
         Insights: !Ref Insights
         TestManager: !Ref TestManager
         AiCenter: !Ref AiCenter

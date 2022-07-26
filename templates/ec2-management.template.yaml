@@ -1,0 +1,482 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates a cluster to provide high availability. (qs-1r2g4122s)
+Parameters:
+  AgentAsgName:
+    Type: String
+    Description: Name of agents autoscaling group
+  ServerAsgName:
+    Type: String
+    Description: Name of servers autoscaling group
+  InstanceAMIImageNameSSMParameter:
+    Type: String
+    Default: ''
+    Description: Name of the SSM Parameter that holds the Image Name used at deploy time
+  InstanceAMIIdSSMParameter:
+    Type: String
+    Default: ''
+    Description: Name of the SSM Parameter that stores the AMI id
+  InstanceIamRoleArn:
+    Type: String
+    Description: IAM Role ARN used by the EC2 instances
+  AgentLaunchTemplateName:
+    Type: String
+    Description: Name of agent autoscaling group launch template
+  ServerLaunchTemplateName:
+    Type: String
+    Description: Name of servers autoscaling group launch template
+  QSS3BucketName:
+    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+    ConstraintDescription: >-
+      Quick Start bucket name can include numbers, lowercase letters, uppercase
+      letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Description: Name of the S3 bucket for your copy of the Quick Start assets. Do not modify.
+    Type: String
+    Default: uipath-s3-quickstart
+  QSS3BucketRegion:
+    Default: us-east-1
+    Description: >-
+      AWS Region where the Quick Start S3 bucket (QSS3BucketName) is hosted. Do not modify.
+    Type: String
+    AllowedPattern: (us(-gov)?|ap|ca|cn|eu|sa)-(central|(north|south)?(east|west)?)-\d
+    ConstraintDescription: Must be a valid AWS Region code.
+  QSS3KeyPrefix:
+    AllowedPattern: '^[0-9a-zA-Z-/]*/$'
+    ConstraintDescription: >-
+      The Quick Start S3 key prefix can include numbers, lowercase letters,
+      uppercase letters, hyphens (-), and forward slashes (/).
+    Default: aws-quickstart-sf/
+    Description: >-
+      S3 key prefix that is used to simulate a directory for your copy of the
+      Quick Start assets. Do not modify.
+    Type: String
+Conditions:
+  UsingDefaultBucket: !Equals
+    - !Ref QSS3BucketName
+    - uipath-s3-quickstart
+Resources:
+
+  # CloudWatch log group for logging events from the SSM automation
+  LifecycleAutomationLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/uipath/instance-lifecycle-ssm/${AWS::StackName}"
+      RetentionInDays: 30
+
+  AgentAsgLifeCycleHookTerminating:
+    Type: 'AWS::AutoScaling::LifecycleHook'
+    Properties:
+      AutoScalingGroupName: !Ref AgentAsgName
+      LifecycleTransition: 'autoscaling:EC2_INSTANCE_TERMINATING'
+      HeartbeatTimeout: 7200
+      DefaultResult: CONTINUE
+
+  ServerAsgLifeCycleHookTerminating:
+    Type: 'AWS::AutoScaling::LifecycleHook'
+    Properties:
+      AutoScalingGroupName: !Ref ServerAsgName
+      LifecycleTransition: 'autoscaling:EC2_INSTANCE_TERMINATING'
+      HeartbeatTimeout: 7200
+      DefaultResult: CONTINUE
+
+
+  AutomationAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ssm.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - "autoscaling:CompleteLifecycleAction"
+                  - "autoscaling:RecordLifecycleActionHeartbeat"
+                  - "autoscaling:UpdateAutoScalingGroup"
+                  - "ssm:SendCommand"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${ServerAsgName}"
+                  - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AgentAsgName}"
+                Effect: Allow
+          PolicyName: allow-asg-instances-operations
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - "autoscaling:DescribeAutoScalingGroups"
+                Resource: "*"
+                Effect: Allow
+          PolicyName: allow-asg-describe
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - "ssm:PutParameter"
+                  - "ssm:GetParameter"
+                Resource: 
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${InstanceAMIIdSSMParameter}"
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${InstanceAMIImageNameSSMParameter}"
+                Effect: Allow
+          PolicyName: allow-parameter-store-update
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:CreateLogGroup
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LifecycleAutomationLogs}*"
+                Effect: Allow
+          PolicyName: allow-logs-access
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - ec2:DescribeImages
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                Resource: "*"
+                Effect: Allow
+          PolicyName: allow-ec2-describe-actions
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - iam:PassRole
+                Resource: !Ref InstanceIamRoleArn
+                Effect: Allow
+          PolicyName: allow-pass-as-iam-role
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:RunInstances
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${ServerLaunchTemplateName}"
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${AgentLaunchTemplateName}"
+                Effect: Allow
+          PolicyName: allow-launch-template-actions
+      Path: /
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMFullAccess'
+
+  EventsBridgeAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - "ssm:StartautomationExecution"
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AgentRemoveInstanceDocument}*
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${ServerRemoveInstanceDocument}*
+                Effect: Allow
+          PolicyName: startSsmExecution
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - "iam:PassRole"
+                Resource: !GetAtt AutomationAssumeRole.Arn
+                Effect: Allow
+          PolicyName: allow-all
+      Path: /
+
+  AgentRemoveInstanceDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: UiPath Automation Suite - remove agent instance from cluster
+        schemaVersion: '0.3'
+        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        parameters:
+          InstanceId:
+            type: String
+          AutoScalingGroupName:
+            type: String
+          LifecycleHookName:
+            type: String
+        mainSteps:
+          - name: "RemoveInstance"
+            action: "aws:runCommand"
+            onFailure: Abort
+            inputs:
+              DocumentName: "AWS-RunRemoteScript"
+              InstanceIds:
+                - "{{ InstanceId }}"
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Ref LifecycleAutomationLogs
+              Parameters:
+                sourceType: "S3"
+                sourceInfo: !Sub
+                  - '{"path": "https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/remove-agent.sh"}'
+                  - S3Bucket: !If
+                      - UsingDefaultBucket
+                      - !Sub '${QSS3BucketName}-${AWS::Region}'
+                      - !Ref QSS3BucketName
+                    S3Region: !If
+                      - UsingDefaultBucket
+                      - !Ref AWS::Region
+                      - !Ref QSS3BucketRegion
+                commandLine: "remove-agent.sh"
+          - name: "TerminateTheInstance"
+            action: "aws:executeAwsApi"
+            inputs:
+              LifecycleHookName: "{{ LifecycleHookName }}"
+              InstanceId: "{{ InstanceId }}"
+              AutoScalingGroupName: "{{ AutoScalingGroupName }}"
+              Service: "autoscaling"
+              Api: "CompleteLifecycleAction"
+              LifecycleActionResult: "CONTINUE"
+
+  ServerRemoveInstanceDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: UiPath Automation Suite - remove agent instance from cluster
+        schemaVersion: '0.3'
+        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        parameters:
+          InstanceId:
+            type: String
+          AutoScalingGroupName:
+            type: String
+          LifecycleHookName:
+            type: String
+        mainSteps:
+          - name: "RemoveInstance"
+            action: "aws:runCommand"
+            onFailure: Abort
+            inputs:
+              DocumentName: "AWS-RunRemoteScript"
+              InstanceIds:
+                - "{{ InstanceId }}"
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Ref LifecycleAutomationLogs
+              Parameters:
+                sourceType: "S3"
+                sourceInfo: !Sub
+                  - '{"path": "https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/remove-server.sh"}'
+                  - S3Bucket: !If
+                      - UsingDefaultBucket
+                      - !Sub '${QSS3BucketName}-${AWS::Region}'
+                      - !Ref QSS3BucketName
+                    S3Region: !If
+                      - UsingDefaultBucket
+                      - !Ref AWS::Region
+                      - !Ref QSS3BucketRegion
+                commandLine: "remove-server.sh"
+          - name: "TerminateTheInstance"
+            action: "aws:executeAwsApi"
+            inputs:
+              LifecycleHookName: "{{ LifecycleHookName }}"
+              InstanceId: "{{ InstanceId }}"
+              AutoScalingGroupName: "{{ AutoScalingGroupName }}"
+              Service: "autoscaling"
+              Api: "CompleteLifecycleAction"
+              LifecycleActionResult: "CONTINUE"
+
+  UpdateAMIDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: UiPath Automation Suite - update AMI for the scalling groups
+        schemaVersion: '0.3'
+        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        parameters:
+          ImageName:
+            type: String
+            description: |
+              (Optional) The Image Name used for searching the new AMI.
+              If you didn't use a custom AMI at deploy time you can leave the parameter empty and the Image Name stored in the Parameter Store will be used as default value.
+            default: ''
+          AmiId:
+            type: String
+            description: |
+              (Optional) The AMI id that will be set on the new version of the ASG Launch Template.
+              The AmiId takes precedence over the ImageName.
+            default: ''
+        mainSteps:
+          - name: UpdateAmiId
+            action: 'aws:executeScript'
+            timeoutSeconds: 600
+            maxAttempts: 1
+            onFailure: Abort
+            inputs:
+              Runtime: python3.8
+              Handler: update_ami_id
+              InputPayload:
+                AmiId: '{{AmiId}}'
+                ImageName: '{{ImageName}}'
+                RegionName: !Sub '${AWS::Region}'
+                Architecture: x86_64
+                VirtualizationType: hvm
+                Owners: '309956199498'
+                ServerAsgName: !Ref ServerAsgName
+                AgentAsgName: !Ref AgentAsgName
+                InstanceAMIIdSSMParameter: !Ref InstanceAMIIdSSMParameter
+                InstanceAMIImageNameSSMParameter: !Ref InstanceAMIImageNameSSMParameter
+                
+              Script: |
+                from __future__ import print_function
+                import json
+                import boto3
+                
+                def update_asg_launch_template(asg_name, ami_id, asg_client, ec2_client):
+                  asg_query = asg_client.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])
+                  if 'AutoScalingGroups' not in asg_query or not asg_query['AutoScalingGroups']:
+                      raise Exception('No ASG found matching the value you specified.')
+                  
+                  launch_template_specifications = asg_query['AutoScalingGroups'][0]["LaunchTemplate"]
+                  launch_template_name = launch_template_specifications["LaunchTemplateName"]
+                  launch_template_version = launch_template_specifications["Version"]
+                
+                  new_launch_template_version = ec2_client.create_launch_template_version(
+                    LaunchTemplateName=launch_template_name,
+                    SourceVersion=launch_template_version,
+                    LaunchTemplateData={
+                      'ImageId': ami_id
+                    }
+                  )
+                  asg_client.update_auto_scaling_group(
+                    AutoScalingGroupName=asg_name,
+                    LaunchTemplate={
+                      'LaunchTemplateName': launch_template_name,
+                      'Version': str(new_launch_template_version["LaunchTemplateVersion"]["VersionNumber"])
+                    }
+                  )
+                
+                def update_ssm_parameter(parameter_name, parameter_value, ssm_client):
+                  ssm_client.put_parameter(
+                    Name=parameter_name,
+                    Value=parameter_value,
+                    Overwrite=True
+                  )
+                
+                def update_ami_id(event, context):
+                  print("Received event: " + json.dumps(event, indent=2))
+                
+                  region = event["RegionName"]
+                  architecture = event["Architecture"]
+                  virtualization_type = event["VirtualizationType"]
+                  owners = event["Owners"]
+                  image_name = event["ImageName"]
+                  image_id = event["AmiId"]
+                
+                  ec2 = boto3.client("ec2", region)
+                  asg = boto3.client("autoscaling", region)
+                  ssm = boto3.client("ssm", region)
+
+                  if not image_id and not image_name:
+                    if event["InstanceAMIImageNameSSMParameter"]:
+                      image_name = ssm.get_parameter(Name=event["InstanceAMIImageNameSSMParameter"])['Parameter']['Value']
+                    else:
+                      raise Exception("Neither ImageName or AmiId have been provided")
+
+                  if image_id:
+                    image_querry = {
+                      "ExecutableUsers": ["all"],
+                      "Filters": [
+                          {"Name": "image-id", "Values": [image_id]}
+                      ]
+                    }
+                  else:
+                    image_querry = {
+                      "ExecutableUsers": ["all"],
+                      "Filters": [
+                          {"Name": "name", "Values": [image_name]},
+                          {"Name": "state", "Values": ["available"]},
+                          {"Name": "architecture", "Values": [architecture]},
+                          {"Name": "virtualization-type", "Values": [virtualization_type]}
+                      ],
+                      "Owners": [owners]
+                    }
+                  images = ec2.describe_images(**image_querry)["Images"]
+                  if len(images) > 0:
+                      image_id = images[0]["ImageId"]
+                  else:
+                    raise Exception("Couldn't find an available image that satisfies the constraints")
+                  print(region, image_id)
+                
+                  response = {}
+                  response["ImageId"] = image_id
+                  response["ImageName"] = image_name
+                
+                  
+                  update_ssm_parameter(event["InstanceAMIIdSSMParameter"], image_id, ssm)
+                  if event["InstanceAMIImageNameSSMParameter"] and event["ImageName"]:
+                    update_ssm_parameter(event["InstanceAMIImageNameSSMParameter"], image_name, ssm)
+                
+                  update_asg_launch_template(event["ServerAsgName"], image_id, asg, ec2)
+                  update_asg_launch_template(event["AgentAsgName"], image_id, asg, ec2)
+                  return response
+
+  AgentTerminateEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - "aws.autoscaling"
+        detail-type:
+          - "EC2 Instance-terminate Lifecycle Action"
+        detail:
+          AutoScalingGroupName:
+            - !Ref AgentAsgName
+      State: "ENABLED"
+      Targets:
+        - Arn: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AgentRemoveInstanceDocument}:$DEFAULT"
+          Id: AS-Agent-Termination
+          RoleArn: !GetAtt EventsBridgeAssumeRole.Arn
+          InputTransformer:
+            InputPathsMap:
+              instance_id: $.detail.EC2InstanceId
+              asg_name: "$.detail.AutoScalingGroupName"
+              lch_name: "$.detail.LifecycleHookName"
+            InputTemplate: '{"InstanceId":[<instance_id>],"AutoScalingGroupName":[<asg_name>],"LifecycleHookName":[<lch_name>]}'
+
+  ServerTerminateEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - "aws.autoscaling"
+        detail-type:
+          - "EC2 Instance-terminate Lifecycle Action"
+        detail:
+          AutoScalingGroupName:
+            - !Ref ServerAsgName
+      State: "ENABLED"
+      Targets:
+        - Arn: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${ServerRemoveInstanceDocument}:$DEFAULT"
+          Id: AS-Server-Termination
+          RoleArn: !GetAtt EventsBridgeAssumeRole.Arn
+          InputTransformer:
+            InputPathsMap:
+              instance_id: $.detail.EC2InstanceId
+              asg_name: "$.detail.AutoScalingGroupName"
+              lch_name: "$.detail.LifecycleHookName"
+            InputTemplate: '{"InstanceId":[<instance_id>],"AutoScalingGroupName":[<asg_name>],"LifecycleHookName":[<lch_name>]}'

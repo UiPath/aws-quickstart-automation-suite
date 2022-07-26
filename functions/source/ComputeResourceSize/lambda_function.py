@@ -81,7 +81,7 @@ def create(properties, physical_id):
     core_multi_node_types = ["c5.4xlarge", "c5a.4xlarge", "m5.4xlarge", "m4.4xlarge"]
     ext_multi_node_types = ["c5a.8xlarge", "c5.9xlarge", "m5.8xlarge", "m5a.8xlarge"]
     core_single_node_types = ["c5.4xlarge", "c5a.4xlarge", "m5.4xlarge", "m5a.4xlarge"]
-    ext_single_node_types = ["c5.12xlarge", "c5a.12xlarge", "m5.12xlarge"]
+    ext_single_node_types = ["c5a.8xlarge", "c5.9xlarge", "m5.8xlarge"]
     tm_node_types = ["c5a.8xlarge", "c5.9xlarge", "c4.8xlarge"]
     gpu_node_types = ["p3.2xlarge", "g4dn.4xlarge", "p2.xlarge", "g5.4xlarge"]
 
@@ -92,8 +92,8 @@ def create(properties, physical_id):
             min_cpu_per_node = 16
             min_ram_per_node = 32
         else:
-            total_cpu = 100
-            total_ram = 224
+            total_cpu = 96
+            total_ram = 192
             min_cpu_per_node = 16
             min_ram_per_node = 32
     else:
@@ -103,10 +103,10 @@ def create(properties, physical_id):
             min_cpu_per_node = 16
             min_ram_per_node = 32
         else:
-            total_cpu = 36
-            total_ram = 96
-            min_cpu_per_node = 36
-            min_ram_per_node = 96
+            total_cpu = 32
+            total_ram = 64
+            min_cpu_per_node = 32
+            min_ram_per_node = 64
 
     min_cpu_tm_node = 20
     min_ram_tm_node = 60
