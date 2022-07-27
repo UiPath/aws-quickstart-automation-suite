@@ -644,9 +644,10 @@ Resources:
             fi
             metadata_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
             instance_id=$(curl -H "X-aws-ec2-metadata-token: $metadata_token" -s http://169.254.169.254/latest/meta-data/instance-id)
+            asg_name=$(/usr/local/bin/aws autoscaling describe-auto-scaling-instances --instance-ids "$instance_id" --query 'AutoScalingInstances[*].AutoScalingGroupName' --output text)
             /usr/local/bin/aws autoscaling complete-lifecycle-action --lifecycle-action-result "$lifecycle_action" \
                                                                      --lifecycle-hook-name ${AWS::StackName}-ServerInstallFinishedHook \
-                                                                     --auto-scaling-group-name ServerAutoScalingGroup \
+                                                                     --auto-scaling-group-name "$asg_name" \
                                                                      --instance-id "$instance_id"
   AgentLaunchConfiguration:
     Type: 'AWS::EC2::LaunchTemplate'
@@ -843,9 +844,10 @@ Resources:
             fi
             metadata_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
             instance_id=$(curl -H "X-aws-ec2-metadata-token: $metadata_token" -s http://169.254.169.254/latest/meta-data/instance-id)
+            asg_name=$(/usr/local/bin/aws autoscaling describe-auto-scaling-instances --instance-ids "$instance_id" --query 'AutoScalingInstances[*].AutoScalingGroupName' --output text)
             /usr/local/bin/aws autoscaling complete-lifecycle-action --lifecycle-action-result "$lifecycle_action" \
                                                                      --lifecycle-hook-name ${AWS::StackName}-AgentInstallFinishedHook \
-                                                                     --auto-scaling-group-name AgentAutoScalingGroup \
+                                                                     --auto-scaling-group-name "$asg_name" \
                                                                      --instance-id "$instance_id"
 
   AgentAutoScalingGroup:
