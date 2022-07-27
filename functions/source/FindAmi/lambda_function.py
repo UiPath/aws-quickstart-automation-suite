@@ -26,6 +26,7 @@ def create(properties, physical_id):
     print(region, image_id)
     return_attribute = {}
     return_attribute["ImageId"] = image_id
+    return_attribute["ImageName"] = image_name
     return_attribute["Action"] = "CREATE"
     return cfnresponse.SUCCESS, image_id, return_attribute
 
@@ -34,6 +35,7 @@ def update(properties, physical_id):
     image_id = physical_id
     return_attribute = {}
     return_attribute["ImageId"] = image_id
+    return_attribute["ImageName"] = properties["ImageName"]
     return_attribute["Action"] = "UPDATE"
     return cfnresponse.SUCCESS, image_id, return_attribute
 

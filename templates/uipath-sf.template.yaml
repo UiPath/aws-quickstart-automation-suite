@@ -46,6 +46,7 @@ Metadata:
           - AutomationHub
           - AutomationOps
           - Insights
+          - DataService
           - TestManager
           - AiCenter
           - BusinessApps
@@ -119,6 +120,8 @@ Metadata:
         default: Insights
       TestManager:
         default: Test Manager
+      DataService:
+        default: Data Service
       AiCenter:
         default: AI Center
       BusinessApps:
@@ -151,7 +154,7 @@ Metadata:
         default: Template-hosting S3 region
 Parameters:
   VPCCIDR:
-    AllowedPattern: '^([0-9]{1,3}\.){2}([0]{1}.)[0]{1}(\/[16]{2})$'
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(\/([0-9]|[1-2][0-9]|3[0-2]))?$'
     ConstraintDescription: Must be in format x.x.0.0/16.
     Default: 10.0.0.0/16
     Description: VPC CIDR block, in format x.x.0.0/16.
@@ -232,9 +235,9 @@ Parameters:
   UiPathVersion:
     Description: UiPath version to install
     Type: String
-    Default: '2021.10.4'
+    Default: '2022.4.0'
     AllowedValues:
-      - '2021.10.4'
+      - '2022.4.0'
   InstallerDownloadUrl:
     Description: Custom URL for installer download. Leave empty to use the UiPathVersion, provide an URL to override the version.
     Type: String
@@ -283,6 +286,13 @@ Parameters:
       - 'false'
   TestManager:
     Description: Choose false to disable Test Manager installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DataService:
+    Description: Choose false to disable Data Service installation.
     Type: String
     Default: 'true'
     AllowedValues:
@@ -475,7 +485,7 @@ Resources:
       Code:
         S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
         S3Key: !Sub '${QSS3KeyPrefix}functions/packages/FindAmi/lambda.zip'
-      Runtime: python3.6
+      Runtime: python3.9
       Timeout: 30
       TracingConfig:
         Mode: Active
@@ -487,7 +497,8 @@ Resources:
         SecretStringTemplate: '{"username": "admin"}'
         GenerateStringKey: "password"
         PasswordLength: 30
-        ExcludePunctuation: true
+        ExcludePunctuation: false
+        ExcludeCharacters: '"@/'
   OrgSecret:
     Type: 'AWS::SecretsManager::Secret'
     Properties:
@@ -511,6 +522,22 @@ Resources:
         GenerateStringKey: "password"
         PasswordLength: 30
         ExcludePunctuation: true
+  ArgoCdUserSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Description: Password for ArgoCd readonly User argocdro.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "argocdro"}'
+        GenerateStringKey: "password"
+        PasswordLength: 30
+        ExcludePunctuation: true
+  InstallerDownloadUrlSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/InstallerDownloadUrl"
+      Type: String
+      Value: !If [UsingCustomUrl, !Ref InstallerDownloadUrl, !Sub "https://download.uipath.com/automation-suite/${UiPathVersion}/installer-${UiPathVersion}.zip"]
+      Description: SSM Parameter for storing the Automation Suite Installer URL.
 
   RoutingStack:
     Type: 'AWS::CloudFormation::Stack'
@@ -592,7 +619,7 @@ Resources:
         TaskMining: !Ref TaskMining
         AddGpu: !Ref AddGpu
         DeployBastion: !Ref DeployBastion
-        InstallerDownloadUrl: !If [UsingCustomUrl, !Ref InstallerDownloadUrl, !Sub "https://download.uipath.com/automation-suite/${UiPathVersion}/installer-${UiPathVersion}.zip"]
+        InstallerDownloadUrlParameterName: !Ref InstallerDownloadUrlSSMParameter
 
 
   ConfigureSSLStack:
@@ -686,6 +713,7 @@ Resources:
                   - !Ref RDSPassword
                   - !Ref OrgSecret
                   - !Ref ArgoCdSecret
+                  - !Ref ArgoCdUserSecret
                 Effect: Allow
               - Effect: Allow
                 Action:
@@ -719,7 +747,7 @@ Resources:
       Code:
         S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
         S3Key: !Sub '${QSS3KeyPrefix}functions/packages/CreateInputJson/lambda.zip'
-      Runtime: python3.6
+      Runtime: python3.9
       Timeout: 30
       TracingConfig:
         Mode: Active
@@ -734,6 +762,7 @@ Resources:
       PlatformSecretArn: !Ref PlatformSecret
       OrgSecretArn: !Ref OrgSecret
       ArgoCdSecretArn: !Ref ArgoCdSecret
+      ArgoCdUserSecretArn: !Ref ArgoCdUserSecret
       Fqdn: !Ref UiPathFQDN
       RDSDBInstanceEndpointAddress: !GetAtt
         - DatabaseStack
@@ -747,6 +776,7 @@ Resources:
       AutomationOps: !Ref AutomationOps
       Insights: !Ref Insights
       TestManager: !Ref TestManager
+      DataService: !Ref DataService
       AiCenter: !Ref AiCenter
       BusinessApps: !Ref BusinessApps
       DocumentUnderstanding: !Ref DocumentUnderstanding
@@ -807,7 +837,7 @@ Resources:
       Code:
         S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
         S3Key: !Sub '${QSS3KeyPrefix}functions/packages/ComputeResourceSize/lambda.zip'
-      Runtime: python3.6
+      Runtime: python3.9
       Timeout: 30
       TracingConfig:
         Mode: Active
@@ -822,6 +852,7 @@ Resources:
       AutomationHub: !Ref AutomationHub
       AutomationOps: !Ref AutomationOps
       Insights: !Ref Insights
+      DataService: !Ref DataService
       TestManager: !Ref TestManager
       AiCenter: !Ref AiCenter
       BusinessApps: !Ref BusinessApps
@@ -841,6 +872,33 @@ Resources:
       Description: The deployment kubeconfig file
       SecretString: '{}'
 
+  ManagementStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: IsMultiNode
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/ec2-management.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        InstanceAMIImageNameSSMParameter: !GetAtt ServerStack.Outputs.InstanceAMIImageNameSSMParameter
+        InstanceAMIIdSSMParameter: !GetAtt ServerStack.Outputs.InstanceAMIIdSSMParameter
+        AgentAsgName: !GetAtt ServerStack.Outputs.AgentAsgName
+        ServerAsgName: !GetAtt ServerStack.Outputs.ServerAsgName
+        ServerLaunchTemplateName: !GetAtt ServerStack.Outputs.ServerLaunchTemplateName
+        AgentLaunchTemplateName: !GetAtt ServerStack.Outputs.AgentLaunchTemplateName
+        InstanceIamRoleArn: !GetAtt ServerStack.Outputs.InstanceIamRoleArn
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3BucketRegion: !Ref QSS3BucketRegion
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+
 
 Outputs:
   FQDNLoadBalancer:
@@ -858,6 +916,9 @@ Outputs:
   ArgoCdSecret:
     Description: Secret storing the ArgoCD admin credentials.
     Value: !Ref ArgoCdSecret
+  ArgoCdUserSecret:
+    Description: Secret storing the ArgoCD readonly user credentials.
+    Value: !Ref ArgoCdUserSecret
   OrgSecret:
     Description: Secret storing the org admin credentials.
     Value: !Ref OrgSecret

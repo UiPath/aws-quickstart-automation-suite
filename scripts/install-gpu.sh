@@ -4,6 +4,10 @@ set -eux
 export PATH=$PATH:/var/lib/rancher/rke2/bin:/root/installer/bin:/usr/local/bin
 export KUBECONFIG="/etc/rancher/rke2/rke2.yaml"
 
+function signal_resources() {
+  /opt/uipath/signal-resource.sh $?
+}
+
 function install_agent() {
   local registration_url
 
@@ -48,9 +52,9 @@ function main() {
     yum install -y nvidia-container-runtime.x86_64
     touch /opt/uipath/installed
     install_agent
-    /opt/uipath/signal-resource.sh
   fi
 
 }
 
+trap "signal_resources" EXIT
 main "$@"
