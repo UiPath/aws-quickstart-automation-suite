@@ -97,9 +97,9 @@ Parameters:
   UiPathVersion:
     Description: UiPath version to install
     Type: String
-    Default: '2022.4.0'
+    Default: '2022.4.1'
     AllowedValues:
-      - '2022.4.0'
+      - '2022.4.1'
   ServiceProfile:
     Description: >-
       Choose Default platform to install Orchestrator, Action Center, Test Manager, Insights, Automation Hub, Automation Ops, Data Service.

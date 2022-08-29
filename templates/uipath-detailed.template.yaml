@@ -199,9 +199,9 @@ Parameters:
   UiPathVersion:
     Description: UiPath version to install
     Type: String
-    Default: '2022.4.0'
+    Default: '2022.4.1'
     AllowedValues:
-      - '2022.4.0'
+      - '2022.4.1'
   InstallerDownloadUrl:
     Description: Custom URL for installer download. Leave empty to use the UiPathVersion, provide an URL to override the version.
     Type: String
