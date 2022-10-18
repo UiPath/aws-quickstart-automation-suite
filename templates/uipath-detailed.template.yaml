@@ -299,8 +299,9 @@ Parameters:
       - 'true'
       - 'false'
   HostedZoneID:
-    Description: ID of Route 53 hosted zone.
-    Type: AWS::Route53::HostedZone::Id
+    Description: ID of Route 53 hosted zone. Leave empty to pause the deployment once the load balancer was created and manually configure the DNS.
+    Type: String
+    Default: ''
   UiPathFQDN:
     Description: >-
       Fully qualified domain name (FQDN) for Automation Suite.
