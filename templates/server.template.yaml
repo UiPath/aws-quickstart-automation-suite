@@ -539,6 +539,11 @@ Resources:
                   - (trap "" SIGPIPE; export HOME="/root"; /root/install-server.sh -b)
                   - (trap "" SIGPIPE; export HOME="/root"; /root/install-server.sh)
                 - echo "Done"
+            03_enable_gpu:
+              command: !If
+                - DeployingGpu
+                - /root/installer/configureUiPathAS.sh gpu enable
+                - echo "There are no nodes with GPU in cluster"
         cloudwatch_agent_setup:
           files:
             /tmp/amazon-cloudwatch-agent.rpm:
