@@ -516,7 +516,7 @@ Resources:
                       "mountpath": "/"
                     }
                   },
-                  "backup_interval": "15"
+                  "backup_interval": "720"
                 }
               owner: "root"
               group: "root"
@@ -588,26 +588,25 @@ Resources:
               DeleteOnTermination: false
               Encrypted: true
               VolumeSize: 128
-              VolumeType: gp2
+              VolumeType: gp3
           - DeviceName: /dev/sdb
             Ebs:
               DeleteOnTermination: false
               Encrypted: true
               VolumeSize: !Ref ServerDiskSize
-              VolumeType: gp2
+              VolumeType: gp3
           - DeviceName: /dev/sdc
             Ebs:
               DeleteOnTermination: false
               Encrypted: true
-              VolumeSize: 32
-              VolumeType: io1
-              Iops: 120
+              VolumeSize: 16
+              VolumeType: gp3
           - DeviceName: /dev/sdd
             Ebs:
               DeleteOnTermination: true
               Encrypted: true
-              VolumeSize: 300
-              VolumeType: gp2
+              VolumeSize: 256
+              VolumeType: gp3
         ImageId: !Sub '{{resolve:ssm:${InstanceAmiId}}}'
         IamInstanceProfile:
           Arn: !GetAtt ServiceFabricInstanceProfile.Arn
@@ -803,13 +802,13 @@ Resources:
               DeleteOnTermination: true
               Encrypted: true
               VolumeSize: 128
-              VolumeType: gp2
+              VolumeType: gp3
           - DeviceName: /dev/sdd
             Ebs:
               DeleteOnTermination: true
               Encrypted: true
-              VolumeSize: 300
-              VolumeType: gp2
+              VolumeSize: 256
+              VolumeType: gp3
         ImageId: !Sub '{{resolve:ssm:${InstanceAmiId}}}'
         IamInstanceProfile:
           Arn: !GetAtt ServiceFabricInstanceProfile.Arn
@@ -1074,7 +1073,7 @@ Resources:
             DeleteOnTermination: true
             Encrypted: false
             VolumeSize: 200
-            VolumeType: gp2
+            VolumeType: gp3
       NetworkInterfaces:
         - AssociatePublicIpAddress: true
           DeleteOnTermination: true
@@ -1267,13 +1266,13 @@ Resources:
             DeleteOnTermination: true
             Encrypted: true
             VolumeSize: 128
-            VolumeType: gp2
+            VolumeType: gp3
         - DeviceName: /dev/sdd
           Ebs:
             DeleteOnTermination: true
             Encrypted: true
-            VolumeSize: 300
-            VolumeType: gp2
+            VolumeSize: 256
+            VolumeType: gp3
       NetworkInterfaces:
         - AssociatePublicIpAddress: false
           DeleteOnTermination: true
@@ -1527,13 +1526,13 @@ Resources:
             DeleteOnTermination: true
             Encrypted: true
             VolumeSize: 128
-            VolumeType: gp2
+            VolumeType: gp3
         - DeviceName: /dev/sdd
           Ebs:
             DeleteOnTermination: true
             Encrypted: true
-            VolumeSize: 300
-            VolumeType: gp2
+            VolumeSize: 256
+            VolumeType: gp3
       NetworkInterfaces:
         - AssociatePublicIpAddress: false
           DeleteOnTermination: true
