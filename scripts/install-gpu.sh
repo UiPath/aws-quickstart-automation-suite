@@ -48,7 +48,6 @@ function main() {
       echo $ID$VERSION_ID
     ) && curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.repo | sudo tee /etc/yum.repos.d/nvidia-docker.repo
     dnf clean expire-cache
-    dnf install -y nvidia-container-toolkit
     yum install -y nvidia-container-runtime.x86_64
     touch /opt/uipath/installed
     install_agent
