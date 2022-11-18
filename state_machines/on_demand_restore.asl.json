@@ -1,0 +1,470 @@
+{
+  "StartAt": "DisableBackupFirstServer",
+  "States": {
+    "FailPrimary": {
+      "Type": "Fail",
+      "Error": "PrimaryNodeDisableBackup",
+      "Comment": "Failed to disable the backup on the first node"
+    },
+    "DisableBackupFirstServer": {
+      "Type": "Task",
+      "Next": "WaitFirstServer",
+      "Parameters": {
+        "DocumentName": "AWS-RunShellScript",
+        "InstanceIds.$": "States.Array($.firstServer)",
+        "CloudWatchOutputConfig": {
+          "CloudWatchOutputEnabled": "true",
+          "CloudWatchLogGroupName": "${AutomationLogs}"
+        },
+        "Parameters": {
+          "executionTimeout": [
+            "7200"
+          ],
+          "workingDirectory": [
+            "/root"
+          ],
+          "commands": [
+            "/root/installer/configureUiPathAS.sh snapshot backup disable || echo \"Backup already disabled.\" "
+          ]
+        }
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ssm:sendCommand",
+      "ResultSelector": {
+        "CommandId.$": "$.Command.CommandId",
+        "InstanceId.$": "$.Command.InstanceIds[0]",
+        "Status.$": "$.Command.Status"
+      },
+      "ResultPath": "$.CommandInformation"
+    },
+    "WaitFirstServer": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.CommandInformation.Status",
+          "StringEquals": "Success",
+          "Comment": "Command Succeded",
+          "Next": "PrereqsAllNodesRestore"
+        },
+        {
+          "Or": [
+            {
+              "Variable": "$.CommandInformation.Status",
+              "StringEquals": "Pending"
+            },
+            {
+              "Variable": "$.CommandInformation.Status",
+              "StringEquals": "InProgress"
+            },
+            {
+              "Variable": "$.CommandInformation.Status",
+              "StringEquals": "Delayed"
+            }
+          ],
+          "Comment": "Command not finished",
+          "Next": "WaitFirstServerPolling"
+        }
+      ],
+      "Default": "FailPrimary"
+    },
+    "WaitFirstServerPolling": {
+      "Type": "Wait",
+      "Seconds": 60,
+      "Next": "GetDisableBackupFirstServerCommandStatus"
+    },
+    "GetDisableBackupFirstServerCommandStatus": {
+      "Type": "Task",
+      "Parameters": {
+        "CommandId.$": "$.CommandInformation.CommandId",
+        "InstanceId.$": "$.CommandInformation.InstanceId"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ssm:getCommandInvocation",
+      "ResultSelector": {
+        "CommandId.$": "$.CommandId",
+        "InstanceId.$": "$.InstanceId",
+        "Status.$": "$.Status"
+      },
+      "ResultPath": "$.CommandInformation",
+      "Next": "WaitFirstServer"
+    },
+    "PrereqsAllNodesRestore": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "UninstallAS",
+        "States": {
+          "UninstallAS": {
+            "Type": "Task",
+            "Parameters": {
+              "DocumentName": "AWS-RunRemoteScript",
+              "InstanceIds.$": "States.Array($.instanceId)",
+              "CloudWatchOutputConfig": {
+                "CloudWatchOutputEnabled": "true",
+                "CloudWatchLogGroupName": "${AutomationLogs}"
+              },
+              "Parameters": {
+                "executionTimeout": [
+                  "28800"
+                ],
+                "sourceType": [
+                  "S3"
+                ],
+                "sourceInfo": [
+                  {
+                    "path": "${S3ArtifactsPath}scripts/uninstall.sh"
+                  }
+                ],
+                "commandLine": [
+                  "./uninstall.sh"
+                ]
+              }
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ssm:sendCommand",
+            "ResultSelector": {
+              "CommandId.$": "$.Command.CommandId",
+              "InstanceId.$": "$.Command.InstanceIds[0]",
+              "Status.$": "$.Command.Status"
+            },
+            "ResultPath": "$.CommandInformation",
+            "Next": "WaitUninstall"
+          },
+          "WaitUninstall": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.CommandInformation.Status",
+                "StringEquals": "Success",
+                "Next": "EndPrereqsRestore",
+                "Comment": "Success"
+              },
+              {
+                "Or": [
+                  {
+                    "Variable": "$.CommandInformation.Status",
+                    "StringEquals": "Pending"
+                  },
+                  {
+                    "Variable": "$.CommandInformation.Status",
+                    "StringEquals": "InProgress"
+                  },
+                  {
+                    "Variable": "$.CommandInformation.Status",
+                    "StringEquals": "Delayed"
+                  }
+                ],
+                "Next": "WaitUninstallFinish",
+                "Comment": "Command Succeded"
+              }
+            ],
+            "Default": "UninstallFailed"
+          },
+          "EndPrereqsRestore": {
+            "Type": "Pass",
+            "End": true
+          },
+          "WaitUninstallFinish": {
+            "Type": "Wait",
+            "Seconds": 60,
+            "Next": "CheckUninstallStatus"
+          },
+          "CheckUninstallStatus": {
+            "Type": "Task",
+            "Parameters": {
+              "CommandId.$": "$.CommandInformation.CommandId",
+              "InstanceId.$": "$.CommandInformation.InstanceId"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ssm:getCommandInvocation",
+            "ResultSelector": {
+              "CommandId.$": "$.CommandId",
+              "InstanceId.$": "$.InstanceId",
+              "Status.$": "$.Status"
+            },
+            "ResultPath": "$.CommandInformation",
+            "Next": "WaitUninstall"
+          },
+          "UninstallFailed": {
+            "Type": "Fail"
+          }
+        }
+      },
+      "ItemsPath": "$.allInstances",
+      "Parameters": {
+        "instanceId.$": "$$.Map.Item.Value"
+      },
+      "MaxConcurrency": 1,
+      "ResultPath": null,
+      "Next": "RestoreInfraFirstServer"
+    },
+    "RestoreInfraFirstServer": {
+      "Type": "Task",
+      "Parameters": {
+        "DocumentName": "AWS-RunShellScript",
+        "InstanceIds.$": "States.Array($.firstServer)",
+        "CloudWatchOutputConfig": {
+          "CloudWatchOutputEnabled": "true",
+          "CloudWatchLogGroupName": "${AutomationLogs}"
+        },
+        "Parameters": {
+          "executionTimeout": [
+            "21600"
+          ],
+          "workingDirectory": [
+            "/root"
+          ],
+          "commands": [
+            "export HOME=/root",
+            "/root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output-restore-infra.json --restore --accept-license-agreement"
+          ]
+        }
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ssm:sendCommand",
+      "ResultSelector": {
+        "CommandId.$": "$.Command.CommandId",
+        "InstanceId.$": "$.Command.InstanceIds[0]",
+        "Status.$": "$.Command.Status"
+      },
+      "ResultPath": "$.CommandInformation",
+      "Next": "WaitRestoreInfraFirstServer"
+    },
+    "WaitRestoreInfraFirstServer": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.CommandInformation.Status",
+          "StringEquals": "Success",
+          "Next": "RestoreInfraSecondaryServers",
+          "Comment": "CommandSucceded"
+        },
+        {
+          "Or": [
+            {
+              "Variable": "$.CommandInformation.Status",
+              "StringEquals": "Pending"
+            },
+            {
+              "Variable": "$.CommandInformation.Status",
+              "StringEquals": "InProgress"
+            },
+            {
+              "Variable": "$.CommandInformation.Status",
+              "StringEquals": "Delayed"
+            }
+          ],
+          "Next": "WaitRestoreInfraFirstServerStatus",
+          "Comment": "Command not finished"
+        }
+      ],
+      "Default": "FailRestoreInfraFirstServer"
+    },
+    "FailRestoreInfraFirstServer": {
+      "Type": "Fail",
+      "Error": "FailRestoreInfraFirstServer"
+    },
+    "RestoreInfraSecondaryServers": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "RestoreInfraSecondaryNode",
+        "States": {
+          "RestoreInfraSecondaryNode": {
+            "Type": "Task",
+            "Parameters": {
+              "DocumentName": "AWS-RunShellScript",
+              "InstanceIds.$": "States.Array($.instanceId)",
+              "CloudWatchOutputConfig": {
+                "CloudWatchOutputEnabled": "true",
+                "CloudWatchLogGroupName": "${AutomationLogs}"
+              },
+              "Parameters": {
+                "executionTimeout": [
+                  "21600"
+                ],
+                "workingDirectory": [
+                  "/root"
+                ],
+                "commands.$": "States.Array('export HOME=/root', States.Format('/root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output-restore-infra.json --restore -j {} --accept-license-agreement', $.nodeType))"
+              }
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ssm:sendCommand",
+            "ResultSelector": {
+              "CommandId.$": "$.Command.CommandId",
+              "InstanceId.$": "$.Command.InstanceIds[0]",
+              "Status.$": "$.Command.Status"
+            },
+            "ResultPath": "$.CommandInformation",
+            "Next": "WaitRestoreInfraSecondaryNode"
+          },
+          "WaitRestoreInfraSecondaryNode": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.CommandInformation.Status",
+                "StringEquals": "Success",
+                "Comment": "Command Succeded",
+                "Next": "ContinueInfraRestore"
+              },
+              {
+                "Or": [
+                  {
+                    "Variable": "$.CommandInformation.Status",
+                    "StringEquals": "Pending"
+                  },
+                  {
+                    "Variable": "$.CommandInformation.Status",
+                    "StringEquals": "InProgress"
+                  },
+                  {
+                    "Variable": "$.CommandInformation.Status",
+                    "StringEquals": "Delayed"
+                  }
+                ],
+                "Comment": "Command not finished",
+                "Next": "WaitRestoreInfraSecondaryNodeStatus"
+              }
+            ],
+            "Default": "FailedRestoreInfraSecondaryServer"
+          },
+          "ContinueInfraRestore": {
+            "Type": "Pass",
+            "End": true
+          },
+          "FailedRestoreInfraSecondaryServer": {
+            "Type": "Fail",
+            "Error": "FailedRestoreInfraSecondaryServer"
+          },
+          "WaitRestoreInfraSecondaryNodeStatus": {
+            "Type": "Wait",
+            "Seconds": 300,
+            "Next": "GetRestoreInfraSecondaryNodeStatus"
+          },
+          "GetRestoreInfraSecondaryNodeStatus": {
+            "Type": "Task",
+            "Parameters": {
+              "CommandId.$": "$.CommandInformation.CommandId",
+              "InstanceId.$": "$.CommandInformation.InstanceId"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ssm:getCommandInvocation",
+            "ResultSelector": {
+              "CommandId.$": "$.CommandId",
+              "InstanceId.$": "$.InstanceId",
+              "Status.$": "$.Status"
+            },
+            "ResultPath": "$.CommandInformation",
+            "Next": "WaitRestoreInfraSecondaryNode"
+          }
+        }
+      },
+      "ItemsPath": "$.secondaryInstances",
+      "MaxConcurrency": 1,
+      "ResultPath": null,
+      "Next": "PerformRestore"
+    },
+    "PerformRestore": {
+      "Type": "Task",
+      "Parameters": {
+        "DocumentName": "AWS-RunRemoteScript",
+        "InstanceIds.$": "States.Array($.firstServer)",
+        "CloudWatchOutputConfig": {
+          "CloudWatchOutputEnabled": "true",
+          "CloudWatchLogGroupName": "${AutomationLogs}"
+        },
+        "Parameters": {
+          "executionTimeout": [
+            "28800"
+          ],
+          "sourceType": [
+            "S3"
+          ],
+          "sourceInfo": [
+            {
+              "path": "${S3ArtifactsPath}scripts/restore.sh"
+            }
+          ],
+          "commandLine.$": "States.Array(States.Format('./restore.sh {}', $.snapshotName))"
+        }
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ssm:sendCommand",
+      "ResultSelector": {
+        "CommandId.$": "$.Command.CommandId",
+        "InstanceId.$": "$.Command.InstanceIds[0]",
+        "Status.$": "$.Command.Status"
+      },
+      "ResultPath": "$.CommandInformation",
+      "Next": "WaitRestore"
+    },
+    "WaitRestore": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Or": [
+            {
+              "Variable": "$.CommandInformation.Status ",
+              "StringEquals": "Pending"
+            },
+            {
+              "Variable": "$.CommandInformation.Status ",
+              "StringEquals": "Delayed"
+            },
+            {
+              "Variable": "$.CommandInformation.Status ",
+              "StringEquals": "InProgress"
+            }
+          ],
+          "Comment": "Command not finished",
+          "Next": "WaitRestoreStatus"
+        },
+        {
+          "Variable": "$.CommandInformation.Status",
+          "StringEquals": "Success",
+          "Next": "SuccessRestore",
+          "Comment": "Command Succeded"
+        }
+      ],
+      "Default": "FailRestoreVolumes"
+    },
+    "FailRestoreVolumes": {
+      "Type": "Fail",
+      "Error": "FailRestoreVolumes"
+    },
+    "WaitRestoreStatus": {
+      "Type": "Wait",
+      "Seconds": 300,
+      "Next": "CheckRestore"
+    },
+    "CheckRestore": {
+      "Type": "Task",
+      "Parameters": {
+        "CommandId.$": "$.CommandInformation.CommandId",
+        "InstanceId.$": "$.CommandInformation.InstanceId"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ssm:getCommandInvocation",
+      "ResultSelector": {
+        "CommandId.$": "$.CommandId",
+        "InstanceId.$": "$.InstanceId",
+        "Status.$": "$.Status"
+      },
+      "ResultPath": "$.CommandInformation",
+      "Next": "WaitRestore"
+    },
+    "WaitRestoreInfraFirstServerStatus": {
+      "Type": "Wait",
+      "Seconds": 300,
+      "Next": "CheckRestoreInfraFirstServerStatus"
+    },
+    "CheckRestoreInfraFirstServerStatus": {
+      "Type": "Task",
+      "Parameters": {
+        "CommandId.$": "$.CommandInformation.CommandId",
+        "InstanceId.$": "$.CommandInformation.InstanceId"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ssm:getCommandInvocation",
+      "ResultSelector": {
+        "CommandId.$": "$.CommandId",
+        "InstanceId.$": "$.InstanceId",
+        "Status.$": "$.Status"
+      },
+      "ResultPath": "$.CommandInformation",
+      "Next": "WaitRestoreInfraFirstServer"
+    },
+    "SuccessRestore": {
+      "Type": "Succeed"
+    }
+  }
+}

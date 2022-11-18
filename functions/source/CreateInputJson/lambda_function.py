@@ -5,6 +5,48 @@ import threading
 import uuid
 import random
 import string
+import base64
+from urllib.parse import quote
+
+AICENTER_EXTERNAL_IDENTITY_CERT_PATH = "/root/installer/identity.cer"
+AICENTER_EXTERNAL_ORCH_CERT_PATH = "/root/installer/orchestrator.cer"
+
+def get_enabled_services_map(properties):
+    enabled_services_map = {
+        'platform' : True,
+        'processmining': properties['ProcessMining'].lower() == "true",
+        'orchestrator' : properties['Orchestrator'].lower() == "true",
+        'action_center' : properties['ActionCenter'].lower() == "true",
+        'test_manager' : properties['TestManager'].lower() == "true",
+        'insights' : properties['Insights'].lower() == "true",
+        'dataservice' : properties['DataService'].lower() == "true",
+        'automation_hub' : properties['AutomationHub'].lower() == "true",
+        'automation_ops' : properties['AutomationOps'].lower() == "true",
+        'task_mining' : properties['TaskMining'].lower() == "true",
+        'aicenter' : properties['AiCenter'].lower() == "true",
+        'documentunderstanding' : properties['DocumentUnderstanding'].lower() == "true",
+        'apps' : properties['BusinessApps'].lower() == "true",
+        'asrobots' : properties['ASRobots'].lower() == "true"
+    }
+    print("Enabled services:")
+    for service, status in enabled_services_map.items():
+        print(f'{service} is enabled? {status}')
+    return enabled_services_map
+
+
+def check_certificate(service, base64_encoded_cert):
+    if not base64_encoded_cert:
+        print(f"{service} certificate not provided.")
+        raise Exception("Certificate missing")
+    try:
+        base64.b64decode(base64_encoded_cert, validate=True)
+    except Exception as e:
+        print("Failed to decode base64 certificate provided")
+        raise e
+
+def check_ai_center_external_certificates(properties: dict):
+    check_certificate("Orchestrator", properties['OrchestratorCertificate'])
+    check_certificate("Identity", properties['IdentityCertificate'])
 
 
 def create(properties, physical_id):
@@ -17,30 +59,31 @@ def create(properties, physical_id):
     argocd_user_secret_arn = properties['ArgoCdUserSecretArn']
     fqdn = properties["Fqdn"]
     db_endpoint = properties["RDSDBInstanceEndpointAddress"]
+    pm_db_endpoint = properties["PMRDSDBInstanceEndpointAddress"]
     multi_node = properties["MultiNode"]
     internal_load_balancer_dns = properties["KubeLoadBalancerDns"]
-    action_center = properties['ActionCenter']
-    test_manager = properties['TestManager']
-    insights = properties['Insights']
-    data_service = properties['DataService']
-    automation_hub = properties['AutomationHub']
-    automation_ops = properties['AutomationOps']
-    task_mining = properties['TaskMining']
-    ai_center = properties['AiCenter']
-    du = properties['DocumentUnderstanding']
-    apps = properties['BusinessApps']
     add_gpu = properties['AddGpu']
     server_instance_count = int(properties['ServerInstanceCount'])
     agent_instance_count = int(properties['AgentInstanceCount'])
     private_subnet_ids = properties['PrivateSubnetIDs']
     extra_dict_keys = properties['ExtraConfigKeys']
     self_signed_cert_validity = properties['SelfSignedCertificateValidity']
-
+    use_external_orchestrator = properties['UseExternalOrchestrator']
+    orchestrator_url = properties['OrchestratorURL']
+    identity_url = properties['IdentityURL']
     initial_number_of_instances = server_instance_count + agent_instance_count
+
+    enabled_services_map = get_enabled_services_map(properties)
+    if use_external_orchestrator.lower() == "true":
+        check_ai_center_external_certificates(properties)
 
     ret = {"fqdn": fqdn, "rke_token": str(uuid.uuid4())}
     ret['cloud_template_vendor'] = 'AWS'
     ret['cloud_template_source'] = 'Quickstart'
+
+    ret['external_object_storage'] = {
+        'enabled': False,
+    }
 
     ret['fixed_rke_address'] = internal_load_balancer_dns
     if multi_node.lower() == 'multi node':
@@ -123,76 +166,71 @@ def create(properties, physical_id):
 
     dot_net_escaped_password = secret['password'].replace("'", "''")
     odbc_escaped_password = secret['password'].replace("}", "}}")
+    urlencoded_pyodbc_username = quote(secret['username'], safe='')
+    urlencoded_pyodbc_password = quote(secret['password'], safe='')
 
     print("Adding SQL connection strings to JSON")
     ret["sql_connection_string_template"] = f"Server=tcp:{db_endpoint},1433;Initial Catalog=DB_NAME_PLACEHOLDER;Persist Security Info=False;User Id={secret['username']};Password='{dot_net_escaped_password}';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30;Max Pool Size=100;"
-    ret["sql_connection_string_template_jdbc"] = f"jdbc:sqlserver://{db_endpoint};database=DB_NAME_PLACEHOLDER;user={secret['username']};password={{{odbc_escaped_password}}}"
-    ret["sql_connection_string_template_odbc"] = f"SERVER={db_endpoint};DATABASE=DB_NAME_PLACEHOLDER;DRIVER={{ODBC Driver 17 for SQL Server}};UID={secret['username']};PWD={{{odbc_escaped_password}}}"
+    ret["sql_connection_string_template_jdbc"] = f"jdbc:sqlserver://{db_endpoint}:1433;database=DB_NAME_PLACEHOLDER;user={secret['username']};password={{{odbc_escaped_password}}};encrypt=true;trustServerCertificate=true;Connection Timeout=30;"
+    ret["sql_connection_string_template_odbc"] = f"SERVER={db_endpoint},1433;DATABASE=DB_NAME_PLACEHOLDER;DRIVER={{ODBC Driver 17 for SQL Server}};UID={secret['username']};PWD={{{odbc_escaped_password}}};MultipleActiveResultSets=False;Encrypt=YES;TrustServerCertificate=YES;Connection Timeout=30;"
+    ret["sql_connection_string_template_sqlalchemy_pyodbc"] = f"mssql+pyodbc://{urlencoded_pyodbc_username}:{urlencoded_pyodbc_password}@{db_endpoint}:1433/DB_NAME_PLACEHOLDER?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=YES&Encrypt=YES"
+
+    ret['platform'] = {}
+    ret['platform']['enabled'] = enabled_services_map['platform']
 
     ret['orchestrator'] = {}
-    ret['orchestrator']['testautomation'] = {"enabled": True}
-    ret['orchestrator']['updateserver'] = {"enabled": True}
+    ret['orchestrator']['enabled'] = enabled_services_map['orchestrator']
+    ret['orchestrator']['testautomation'] = {"enabled": enabled_services_map['orchestrator']}
+    ret['orchestrator']['updateserver'] = {"enabled": enabled_services_map['orchestrator']}
 
-    if automation_hub.lower() == "true":
-        ret['automation_hub'] = {"enabled": True}
-    else:
-        ret['automation_hub'] = {"enabled": False}
+    ret['automation_hub'] = {"enabled": enabled_services_map['automation_hub']}
 
-    if automation_ops.lower() == "true":
-        ret['automation_ops'] = {"enabled": True}
-    else:
-        ret['automation_ops'] = {"enabled": False}
+    ret['automation_ops'] = {"enabled": enabled_services_map['automation_ops']}
 
-    if action_center.lower() == "true":
-        ret['action_center'] = {"enabled": True}
-    else:
-        ret['action_center'] = {"enabled": False}
+    ret['action_center'] =  {"enabled":enabled_services_map['action_center']}
 
-    if data_service.lower() == "true":
-        ret['dataservice'] = {"enabled": True}
-    else:
-        ret['dataservice'] = {"enabled": False}
+    ret['dataservice'] = {"enabled": enabled_services_map['dataservice']}
 
-    if test_manager.lower() == "true":
-        ret['test_manager'] = {"enabled": True}
-    else:
-        ret['test_manager'] = {"enabled": False}
+    ret['test_manager'] = {"enabled": enabled_services_map['test_manager']}
 
-    if insights.lower() == "true":
-        ret['insights'] = {"enabled": True}
-    else:
-        ret['insights'] = {"enabled": False}
+    ret['insights'] = {"enabled": enabled_services_map['test_manager']}
 
-    if apps.lower() == "true":
-        ret['apps'] = {"enabled": True}
-    else:
-        ret['apps'] = {"enabled": False}
+    ret['apps'] = {"enabled": enabled_services_map['apps']}
 
-    if task_mining.lower() == "true":
-        ret['task_mining'] = {"enabled": True}
+    ret['task_mining'] = {"enabled": enabled_services_map['task_mining']}
+    if enabled_services_map['task_mining']:
         initial_number_of_instances += 1
-    else:
-        ret['task_mining'] = {
-            "enabled": False
-        }
 
-    if ai_center.lower() == "true":
-        ret['aicenter'] = {
-            "enabled": True
-        }
-    else:
-        ret['aicenter'] = {"enabled": False}
-
-    if du.lower() == "true":
-        ret['documentunderstanding'] = {
-            "enabled": True,
-            "handwriting": {
-                "enabled": "true",
-                "max_cpu_per_pod": 2
+    ret['processmining'] = {"enabled": enabled_services_map['processmining']}
+    if enabled_services_map['processmining']:
+        if pm_db_endpoint:
+            ret['processmining']["warehouse"] = {
+                "sql_connection_str": f"Server=tcp:{pm_db_endpoint},1433;Initial Catalog=DB_NAME_PLACEHOLDER;Persist Security Info=False;User Id={secret['username']};Password='{dot_net_escaped_password}';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30;Max Pool Size=100;",
+                "sqlalchemy_pyodbc_sql_connection_str": f"mssql+pyodbc://{urlencoded_pyodbc_username}:{urlencoded_pyodbc_password}@{pm_db_endpoint}:1433/DB_NAME_PLACEHOLDER?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=YES&Encrypt=YES"
             }
+
+    ret['aicenter'] = {"enabled": enabled_services_map['aicenter']}
+    if enabled_services_map['aicenter']:
+        if use_external_orchestrator.lower() == "true":
+            ret['aicenter']["orchestrator_url"] = orchestrator_url
+            ret['aicenter']["identity_server_url"] = identity_url
+            ret['aicenter']["orchestrator_cert_file_path"] = AICENTER_EXTERNAL_ORCH_CERT_PATH
+            ret['aicenter']["identity_cert_file_path"] = AICENTER_EXTERNAL_IDENTITY_CERT_PATH
+            ret['aicenter']["metering_api_key"] = "PLACEHOLDER"
+
+    ret['documentunderstanding'] = {}
+    ret['documentunderstanding']['enabled'] = enabled_services_map['documentunderstanding']
+    if enabled_services_map['documentunderstanding']:
+        ret['documentunderstanding']['handwriting'] = {
+            "enabled": True,
+            "max_cpu_per_pod": 2
         }
-    else:
-        ret['documentunderstanding'] = {"enabled": False}
+
+    ret['asrobots'] = {'enabled': enabled_services_map['asrobots']}
+    if enabled_services_map['asrobots']:
+        ret['asrobots']["packagecaching"] = True
+        if multi_node.lower() == 'multi node':
+            initial_number_of_instances += 1
 
     ret["initial_number_of_instances"] = initial_number_of_instances
 
@@ -215,31 +253,32 @@ def update(properties, physical_id):
     argocd_user_secret_arn = properties['ArgoCdUserSecretArn']
     fqdn = properties["Fqdn"]
     db_endpoint = properties["RDSDBInstanceEndpointAddress"]
+    pm_db_endpoint = properties["PMRDSDBInstanceEndpointAddress"]
     multi_node = properties["MultiNode"]
     internal_load_balancer_dns = properties["KubeLoadBalancerDns"]
-    action_center = properties['ActionCenter']
-    data_service = properties['DataService']
-    test_manager = properties['TestManager']
-    insights = properties['Insights']
-    automation_hub = properties['AutomationHub']
-    automation_ops = properties['AutomationOps']
-    task_mining = properties['TaskMining']
-    ai_center = properties['AiCenter']
-    du = properties['DocumentUnderstanding']
-    apps = properties['BusinessApps']
     add_gpu = properties['AddGpu']
     server_instance_count = int(properties['ServerInstanceCount'])
     agent_instance_count = int(properties['AgentInstanceCount'])
     private_subnet_ids = properties['PrivateSubnetIDs']
     extra_dict_keys = properties['ExtraConfigKeys']
     self_signed_cert_validity = properties['SelfSignedCertificateValidity']
-
+    use_external_orchestrator = properties['UseExternalOrchestrator']
+    orchestrator_url = properties['OrchestratorURL']
+    identity_url = properties['IdentityURL']
     initial_number_of_instances = server_instance_count + agent_instance_count
+
+    enabled_services_map = get_enabled_services_map(properties)
+    if use_external_orchestrator.lower() == "true":
+        check_ai_center_external_certificates(properties)
 
     ret = {"fqdn": fqdn, "rke_token": str(uuid.uuid4())}
     ret['cloud_template_vendor'] = 'AWS'
     ret['cloud_template_source'] = 'Quickstart'
 
+    ret['external_object_storage'] = {
+        'enabled': False,
+    }
+    
     ret['fixed_rke_address'] = internal_load_balancer_dns
     if multi_node.lower() == 'multi node':
         ret['profile'] = 'ha'
@@ -321,76 +360,73 @@ def update(properties, physical_id):
 
     dot_net_escaped_password = secret['password'].replace("'", "''")
     odbc_escaped_password = secret['password'].replace("}", "}}")
+    urlencoded_pyodbc_username = quote(secret['username'], safe='')
+    urlencoded_pyodbc_password = quote(secret['password'], safe='')
 
     print("Adding SQL connection strings to JSON")
     ret["sql_connection_string_template"] = f"Server=tcp:{db_endpoint},1433;Initial Catalog=DB_NAME_PLACEHOLDER;Persist Security Info=False;User Id={secret['username']};Password='{dot_net_escaped_password}';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30;Max Pool Size=100;"
-    ret["sql_connection_string_template_jdbc"] = f"jdbc:sqlserver://{db_endpoint};database=DB_NAME_PLACEHOLDER;user={secret['username']};password={{{odbc_escaped_password}}}"
-    ret["sql_connection_string_template_odbc"] = f"SERVER={db_endpoint};DATABASE=DB_NAME_PLACEHOLDER;DRIVER={{ODBC Driver 17 for SQL Server}};UID={secret['username']};PWD={{{odbc_escaped_password}}}"
+    ret["sql_connection_string_template_jdbc"] = f"jdbc:sqlserver://{db_endpoint}:1433;database=DB_NAME_PLACEHOLDER;user={secret['username']};password={{{odbc_escaped_password}}};encrypt=true;trustServerCertificate=true;Connection Timeout=30;"
+    ret["sql_connection_string_template_odbc"] = f"SERVER={db_endpoint},1433;DATABASE=DB_NAME_PLACEHOLDER;DRIVER={{ODBC Driver 17 for SQL Server}};UID={secret['username']};PWD={{{odbc_escaped_password}}};MultipleActiveResultSets=False;Encrypt=YES;TrustServerCertificate=YES;Connection Timeout=30;"
+    ret["sql_connection_string_template_sqlalchemy_pyodbc"] = f"mssql+pyodbc://{urlencoded_pyodbc_username}:{urlencoded_pyodbc_password}@{db_endpoint}:1433/DB_NAME_PLACEHOLDER?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=YES&Encrypt=YES"
+
+    ret['platform'] = {}
+    ret['platform']['enabled'] = enabled_services_map['platform']
 
     ret['orchestrator'] = {}
-    ret['orchestrator']['testautomation'] = {"enabled": True}
-    ret['orchestrator']['updateserver'] = {"enabled": True}
+    ret['orchestrator']['enabled'] = enabled_services_map['orchestrator']
+    ret['orchestrator']['testautomation'] = {"enabled": enabled_services_map['orchestrator']}
+    ret['orchestrator']['updateserver'] = {"enabled": enabled_services_map['orchestrator']}
 
-    if automation_hub.lower() == "true":
-        ret['automation_hub'] = {"enabled": True}
-    else:
-        ret['automation_hub'] = {"enabled": False}
+    ret['automation_hub'] = {"enabled": enabled_services_map['automation_hub']}
 
-    if automation_ops.lower() == "true":
-        ret['automation_ops'] = {"enabled": True}
-    else:
-        ret['automation_ops'] = {"enabled": False}
+    ret['automation_ops'] = {"enabled": enabled_services_map['automation_ops']}
 
-    if action_center.lower() == "true":
-        ret['action_center'] = {"enabled": True}
-    else:
-        ret['action_center'] = {"enabled": False}
+    ret['action_center'] =  {"enabled":enabled_services_map['action_center']}
 
-    if data_service.lower() == "true":
-        ret['dataservice'] = {"enabled": True}
-    else:
-        ret['dataservice'] = {"enabled": False}
+    ret['dataservice'] = {"enabled": enabled_services_map['dataservice']}
 
-    if test_manager.lower() == "true":
-        ret['test_manager'] = {"enabled": True}
-    else:
-        ret['test_manager'] = {"enabled": False}
+    ret['test_manager'] = {"enabled": enabled_services_map['test_manager']}
 
-    if insights.lower() == "true":
-        ret['insights'] = {"enabled": True}
-    else:
-        ret['insights'] = {"enabled": False}
+    ret['insights'] = {"enabled": enabled_services_map['test_manager']}
 
-    if apps.lower() == "true":
-        ret['apps'] = {"enabled": True}
-    else:
-        ret['apps'] = {"enabled": False}
+    ret['apps'] = {"enabled": enabled_services_map['apps']}
 
-    if task_mining.lower() == "true":
-        ret['task_mining'] = {"enabled": True}
+    ret['task_mining'] = {"enabled": enabled_services_map['task_mining']}
+    if enabled_services_map['task_mining']:
         initial_number_of_instances += 1
-    else:
-        ret['task_mining'] = {
-            "enabled": False
-        }
 
-    if ai_center.lower() == "true":
-        ret['aicenter'] = {
-            "enabled": True
-        }
-    else:
-        ret['aicenter'] = {"enabled": False}
+    ret['processmining'] = {"enabled": enabled_services_map['processmining']}
 
-    if du.lower() == "true":
-        ret['documentunderstanding'] = {
+    ret['aicenter'] = {"enabled": enabled_services_map['aicenter']}
+    if enabled_services_map['aicenter']:
+        if use_external_orchestrator.lower() == "true":
+            ret['aicenter']["orchestrator_url"] = orchestrator_url
+            ret['aicenter']["identity_server_url"] = identity_url
+            ret['aicenter']["orchestrator_cert_file_path"] = AICENTER_EXTERNAL_ORCH_CERT_PATH
+            ret['aicenter']["identity_cert_file_path"] = AICENTER_EXTERNAL_IDENTITY_CERT_PATH
+            ret['aicenter']["metering_api_key"] = "PLACEHOLDER"
+    
+    ret['documentunderstanding'] = {}
+    ret['documentunderstanding']['enabled'] = enabled_services_map['documentunderstanding']
+    if enabled_services_map['documentunderstanding']:
+        ret['documentunderstanding']['handwriting'] = {
             "enabled": True,
-            "handwriting": {
-                "enabled": "true",
-                "max_cpu_per_pod": 2
-            }
+            "max_cpu_per_pod": 2
         }
-    else:
-        ret['documentunderstanding'] = {"enabled": False}
+    
+    ret['processmining'] = {"enabled": enabled_services_map['processmining']}
+    if enabled_services_map['processmining']:
+        if pm_db_endpoint:
+            ret['processmining']["warehouse"] = {
+                "sql_connection_str": f"Server=tcp:{pm_db_endpoint},1433;Initial Catalog=DB_NAME_PLACEHOLDER;Persist Security Info=False;User Id={secret['username']};Password='{dot_net_escaped_password}';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30;Max Pool Size=100;",
+                "sqlalchemy_pyodbc_sql_connection_str": f"mssql+pyodbc://{urlencoded_pyodbc_username}:{urlencoded_pyodbc_password}@{pm_db_endpoint}:1433/DB_NAME_PLACEHOLDER?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=YES&Encrypt=YES"
+            }
+
+    ret['asrobots'] = {'enabled': enabled_services_map['asrobots']}
+    if enabled_services_map['asrobots']:
+        ret['asrobots']["packagecaching"] = True
+        if multi_node.lower() == 'multi node':
+            initial_number_of_instances += 1
 
     ret["initial_number_of_instances"] = initial_number_of_instances
 
@@ -433,4 +469,5 @@ def handler(event, context):
         print('Exception: ' + str(e))
         status = cfnresponse.FAILED
     finally:
+        timer.cancel()
         cfnresponse.send(event, context, status, returnAttribute, new_physical_id)

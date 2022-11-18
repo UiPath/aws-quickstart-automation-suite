@@ -42,6 +42,7 @@ Metadata:
       - Label:
           default: Automation Suite services
         Parameters:
+          - Orchestrator
           - ActionCenter
           - AutomationHub
           - AutomationOps
@@ -52,6 +53,16 @@ Metadata:
           - BusinessApps
           - DocumentUnderstanding
           - TaskMining
+          - ASRobots
+          - ProcessMining
+      - Label:
+          default: Automation Suite external Orchestrator configuration
+        Parameters:
+          - UseExternalOrchestrator
+          - OrchestratorURL
+          - IdentityURL
+          - OrchestratorCertificate
+          - IdentityCertificate
       - Label:
           default: DNS or SSL configuration
         Parameters:
@@ -110,6 +121,8 @@ Metadata:
         default: Extra configuration keys
       SelfSignedCertificateValidity:
         default: Validity of the self signed certificate
+      Orchestrator:
+        default: Orchsestrator
       ActionCenter:
         default: Action Center
       AutomationHub:
@@ -130,6 +143,20 @@ Metadata:
         default: Document Understanding
       TaskMining:
         default: Task Mining
+      ASRobots:
+        default: Automation Suite Robots
+      ProcessMining:
+        default: Process Mining
+      UseExternalOrchestrator:
+        default: Connect AiCenter to an external Orchestrator
+      OrchestratorURL:
+        default: Orchestrator URL
+      IdentityURL:
+        default: Identity URL
+      OrchestratorCertificate:
+        default: Base64 encoded Orchestrator certificate
+      IdentityCertificate:
+        default: Base64 encoded Identity certificate
       AddGpu:
         default: Add GPU enabled VMs
       UiPathFQDN:
@@ -155,9 +182,9 @@ Metadata:
 Parameters:
   VPCCIDR:
     AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(\/([0-9]|[1-2][0-9]|3[0-2]))?$'
-    ConstraintDescription: Must be in format x.x.0.0/16.
+    ConstraintDescription: Must be a valid CIDR format (e.g 10.0.0.0/16)
     Default: 10.0.0.0/16
-    Description: VPC CIDR block, in format x.x.0.0/16.
+    Description: VPC CIDR block
     Type: String
   VPCID:
     Type: 'AWS::EC2::VPC::Id'
@@ -235,9 +262,9 @@ Parameters:
   UiPathVersion:
     Description: UiPath version to install
     Type: String
-    Default: '2022.4.2'
+    Default: '2022.10.0'
     AllowedValues:
-      - '2022.4.2'
+      - '2022.10.0'
   InstallerDownloadUrl:
     Description: Custom URL for installer download. Leave empty to use the UiPathVersion, provide an URL to override the version.
     Type: String
@@ -256,6 +283,13 @@ Parameters:
       - "730"
       - "1825"
       - "3650"
+  Orchestrator:
+    Description: Choose false to disable Orchestrator installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
   ActionCenter:
     Description: Choose false to disable Action Center installation.
     Type: String
@@ -326,6 +360,48 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
+  ASRobots: 
+    Description: Chose false to disable Automation Suite Robots installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  ProcessMining:
+    Description: Choose false to disable Process Mining installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  UseExternalOrchestrator:
+    Description: >-
+      Choose true to connect AiCenter to an external Orchestrator
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  OrchestratorURL:
+    Description: >-
+      URL of the Orchestrator to which AiCenter connects
+    Type: String
+    Default: ''
+  IdentityURL:
+    Description: >-
+      URL of the Identity server used to authorize AiCenter
+    Type: String
+    Default: ''
+  OrchestratorCertificate:
+    Description: >-
+      Base64 encoded Orchestrator certificate
+    Type: String
+    Default: ''
+  IdentityCertificate:
+    Description: >-
+      Base64 encoded Identity certificate
+    Type: String
+    Default: ''
   AddGpu:
     Description: >-
       Choose true to add a GPU enabled VM to the deployment.
@@ -441,6 +517,9 @@ Conditions:
     - "Multi Node"
   UsingCustomUrl: !Not [!Equals [!Ref InstallerDownloadUrl, '']]
   IsBackupEnabled: !Equals [ !Ref EnableBackup, "true" ]
+  IsProductionPM: !And
+  - !Equals [!Ref ProcessMining, "true"]
+  - !Condition IsMultiNode
 Resources:
   FindAmiLambdaRole:
     Type: 'AWS::IAM::Role'
@@ -499,7 +578,7 @@ Resources:
         GenerateStringKey: "password"
         PasswordLength: 30
         ExcludePunctuation: false
-        ExcludeCharacters: '"@/'
+        ExcludeCharacters: '"@/\'
   OrgSecret:
     Type: 'AWS::SecretsManager::Secret'
     Properties:
@@ -602,6 +681,7 @@ Resources:
         AmiId: !Ref AmiId
         GpuAmiId: !Ref GpuAmiId
         InstanceType: !GetAtt ComputeResourceSize.InstanceType
+        ASRobotsInstanceType: !GetAtt ComputeResourceSize.ASRobotsInstanceType
         ServerDiskSize: !GetAtt ComputeResourceSize.ServerDiskSize
         TmInstanceType: !GetAtt ComputeResourceSize.TmInstanceType
         GpuInstanceType: !GetAtt ComputeResourceSize.GpuInstanceType
@@ -618,10 +698,13 @@ Resources:
         InputJsonSecretArn: !Ref InputJsonSecret
         KubeconfigSecretArn: !Ref KubeconfigSecret
         TaskMining: !Ref TaskMining
+        ASRobots: !Ref ASRobots
+        UseExternalOrchestrator: !Ref UseExternalOrchestrator
+        OrchestratorCertificate: !Ref OrchestratorCertificate
+        IdentityCertificate: !Ref IdentityCertificate
         AddGpu: !Ref AddGpu
         DeployBastion: !Ref DeployBastion
         InstallerDownloadUrlParameterName: !Ref InstallerDownloadUrlSSMParameter
-
 
   ConfigureSSLStack:
     Type: AWS::CloudFormation::Stack
@@ -659,6 +742,7 @@ Resources:
         SubnetIDs: !Join [",", !Ref PrivateSubnetIDs]
         RDSPasswordSecretArn: !Ref RDSPassword
         MultiAZ: !If [IsMultiNode, "true", "false"]
+        IsProductionPM: !If [IsProductionPM, "true", "false"]
         RDSEngine: !Ref RDSEngine
         RDSVersion: !Ref RDSVersion
         KmsKeyId: !Ref DatabaseKmsKeyId
@@ -768,10 +852,14 @@ Resources:
       RDSDBInstanceEndpointAddress: !GetAtt
         - DatabaseStack
         - Outputs.RDSDBInstanceEndpointAddress
+      PMRDSDBInstanceEndpointAddress: !GetAtt
+        - DatabaseStack
+        - Outputs.PMRDSDBInstanceEndpointAddress
       MultiNode: !Ref MultiNode
       KubeLoadBalancerDns: !GetAtt
         - RoutingStack
         - Outputs.KubeLoadBalancerDns
+      Orchestrator: !Ref Orchestrator
       ActionCenter: !Ref ActionCenter
       AutomationHub: !Ref AutomationHub
       AutomationOps: !Ref AutomationOps
@@ -782,6 +870,13 @@ Resources:
       BusinessApps: !Ref BusinessApps
       DocumentUnderstanding: !Ref DocumentUnderstanding
       TaskMining: !Ref TaskMining
+      ASRobots: !Ref ASRobots
+      ProcessMining: !Ref ProcessMining
+      UseExternalOrchestrator: !Ref UseExternalOrchestrator
+      OrchestratorURL: !Ref OrchestratorURL
+      IdentityURL: !Ref IdentityURL
+      OrchestratorCertificate: !Ref OrchestratorCertificate
+      IdentityCertificate: !Ref IdentityCertificate
       AddGpu: !Ref AddGpu
       ServerInstanceCount: !GetAtt ComputeResourceSize.ServerInstanceCount
       AgentInstanceCount: !GetAtt ComputeResourceSize.AgentInstanceCount
@@ -849,6 +944,7 @@ Resources:
       ServiceToken: !GetAtt ComputeResourceSizeFunction.Arn
       RegionName: !Ref 'AWS::Region'
       MultiNode: !Ref MultiNode
+      Orchestrator: !Ref Orchestrator
       ActionCenter: !Ref ActionCenter
       AutomationHub: !Ref AutomationHub
       AutomationOps: !Ref AutomationOps
@@ -859,6 +955,8 @@ Resources:
       BusinessApps: !Ref BusinessApps
       DocumentUnderstanding: !Ref DocumentUnderstanding
       TaskMining: !Ref TaskMining
+      ProcessMining: !Ref ProcessMining
+      ASRobots: !Ref ASRobots
       AddGpu: !Ref AddGpu
 
   InputJsonSecret:
@@ -875,7 +973,6 @@ Resources:
 
   ManagementStack:
     Type: 'AWS::CloudFormation::Stack'
-    Condition: IsMultiNode
     Properties:
       TemplateURL: !Sub
         - >-
@@ -893,9 +990,14 @@ Resources:
         InstanceAMIIdSSMParameter: !GetAtt ServerStack.Outputs.InstanceAMIIdSSMParameter
         AgentAsgName: !GetAtt ServerStack.Outputs.AgentAsgName
         ServerAsgName: !GetAtt ServerStack.Outputs.ServerAsgName
+        AsRobotsAsgName: !GetAtt ServerStack.Outputs.AsRobotsAsgName
+        GpuAgentInstanceId: !GetAtt ServerStack.Outputs.GpuAgentInstanceId
+        TMAgentInstanceId: !GetAtt ServerStack.Outputs.TMAgentInstanceId
         ServerLaunchTemplateName: !GetAtt ServerStack.Outputs.ServerLaunchTemplateName
         AgentLaunchTemplateName: !GetAtt ServerStack.Outputs.AgentLaunchTemplateName
+        ASRobotsLaunchTemplateName: !GetAtt ServerStack.Outputs.ASRobotsLaunchTemplateName
         InstanceIamRoleArn: !GetAtt ServerStack.Outputs.InstanceIamRoleArn
+        UseExternalOrchestrator: !Ref UseExternalOrchestrator
         QSS3BucketName: !Ref QSS3BucketName
         QSS3BucketRegion: !Ref QSS3BucketRegion
         QSS3KeyPrefix: !Ref QSS3KeyPrefix
@@ -923,3 +1025,6 @@ Outputs:
   OrgSecret:
     Description: Secret storing the org admin credentials.
     Value: !Ref OrgSecret
+  ClusterAdministrationURL:
+    Description: The Unified UI for Cluster management page.
+    Value: !Sub "https://${UiPathFQDN}/uipath-management/"

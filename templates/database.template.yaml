@@ -39,8 +39,12 @@ Parameters:
     Type: String
     Default: ""
     Description: KMS key id to use for database storage encryption
+  IsProductionPM:
+    Type: String
+    Description: Flag to determine whether a second database instance is required for Process Mining
 Conditions:
   UsingKmsKeyId: !Not [!Equals [!Ref KmsKeyId, '']]
+  IsProductionPM: !Equals  [!Ref IsProductionPM, 'true']
 Resources:
   DbSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
@@ -77,6 +81,27 @@ Resources:
       StorageType: gp2
       VPCSecurityGroups:
         - !Ref DbSecurityGroup
+  PMRDSDBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Condition: IsProductionPM
+    Properties:
+      AllocatedStorage: '60'
+      MaxAllocatedStorage: 100
+      BackupRetentionPeriod: 5
+      DBInstanceClass: db.m5.4xlarge
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: !Ref RDSEngine
+      EngineVersion: !Ref RDSVersion
+      PubliclyAccessible: false
+      StorageEncrypted: !If [UsingKmsKeyId, true, false]
+      KmsKeyId: !If [UsingKmsKeyId, !Ref KmsKeyId, !Ref "AWS::NoValue"]
+      LicenseModel: license-included
+      MasterUsername: !Sub '{{resolve:secretsmanager:${RDSPasswordSecretArn}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSPasswordSecretArn}:SecretString:password}}'
+      MultiAZ: !Ref MultiAZ
+      StorageType: gp2
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroup
 Outputs:
   DBSubnetGroup:
     Value: !Ref DBSubnetGroup
@@ -94,3 +119,12 @@ Outputs:
       - RDSDBInstance
       - Endpoint.Port
     Description: RDS-MSSQL Database Instance Endpoint Port
+  PMRDSDBInstanceID:
+    Value: !If [IsProductionPM, !Ref PMRDSDBInstance, '']
+    Description: Process Mining RDS-MSSQL Database Instance ID
+  PMRDSDBInstanceEndpointAddress:
+    Value: !If [IsProductionPM, !GetAtt PMRDSDBInstance.Endpoint.Address, '']
+    Description: Process Mining RDS-MSSQL Database Instance Endpoint Address
+  PMRDSDBInstanceEndpointPort:
+    Value: !If [IsProductionPM, !GetAtt PMRDSDBInstance.Endpoint.Port, '']
+    Description: Process Mining RDS-MSSQL Database Instance Endpoint Port
