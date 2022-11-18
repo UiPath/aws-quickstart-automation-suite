@@ -4,6 +4,161 @@ import cfnresponse
 import threading
 import math
 
+# Platform is counted in the default value callculations
+SERVICES_REQUIRMENTS_MAP = {
+    "single_node": {
+        'platform': {
+            'cpu': 0,
+            'ram': 0
+        },
+        'action_center': {
+            'cpu': 0.7,
+            'ram': 2.1
+        },
+        'aicenter': {
+            'cpu': 2.0,
+            'ram': 6.5,
+        },
+        'apps': {
+            'cpu': 2.8,
+            'ram': 7.2
+        },
+        'automation_hub': {
+            'cpu': 0.5,
+            'ram': 1.4
+        },
+        'automation_ops': {
+            'cpu': 0.2,
+            'ram': 0.7
+        },
+        'asrobots': {
+            'cpu': 0.5,
+            'ram': 0.7
+        },
+        'dataservice': {
+            'cpu': 0.2,
+            'ram': 0.5
+        },
+        'documentunderstanding': {
+            'cpu': 3.2,
+            'ram': 4.0
+        },
+        'insights': {
+            'cpu': 0.3,
+            'ram': 1.7
+        },
+        'orchestrator': {
+            'cpu': 1.0,
+            'ram': 2.6
+        },
+        'processmining': {
+            'cpu': 2.2,
+            'ram': 12.0
+        },
+        'task_mining': {
+            'cpu': 4.0,
+            'ram': 5.0
+        },
+        'test_manager': {
+            'cpu': 0.5,
+            'ram': 1.0
+        }
+    },
+    "multi_node": {
+        'platform': {
+            'cpu': 0,
+            'ram': 0
+        },
+        'action_center': {
+            'cpu': 2.0,
+            'ram': 4.7
+        },
+        'aicenter': {
+            'cpu': 5.5,
+            'ram': 14.0,
+        },
+        'apps': {
+            'cpu': 7.25,
+            'ram': 18.5
+        },
+        'automation_hub': {
+            'cpu': 2.0,
+            'ram': 3.5
+        },
+        'automation_ops': {
+            'cpu': 1.0,
+            'ram': 1.7
+        },
+        'asrobots': {
+            'cpu': 1.0,
+            'ram': 1.5
+        },
+        'dataservice': {
+            'cpu': 0.5,
+            'ram': 1.0
+        },
+        'documentunderstanding': {
+            'cpu': 6.7,
+            'ram': 8.6
+        },
+        'insights': {
+            'cpu': 1.5,
+            'ram': 5.0
+        },
+        'orchestrator': {
+            'cpu': 3.5,
+            'ram': 7.2
+        },
+        'processmining': {
+            'cpu': 5.1,
+            'ram': 24.0
+        },
+        'task_mining': {
+            'cpu': 8.4,
+            'ram': 10.0
+        },
+        'test_manager': {
+            'cpu': 1.0,
+            'ram': 2.0
+        }
+    }
+}
+
+
+def get_enabled_services_map(properties):
+    enabled_services_map = {
+        'platform' : True,
+        'processmining': False,
+        'orchestrator' : properties['Orchestrator'].lower() == "true",
+        'action_center' : properties['ActionCenter'].lower() == "true",
+        'test_manager' : properties['TestManager'].lower() == "true",
+        'insights' : properties['Insights'].lower() == "true",
+        'dataservice' : properties['DataService'].lower() == "true",
+        'automation_hub' : properties['AutomationHub'].lower() == "true",
+        'automation_ops' : properties['AutomationOps'].lower() == "true",
+        'task_mining' : properties['TaskMining'].lower() == "true",
+        'aicenter' : properties['AiCenter'].lower() == "true",
+        'documentunderstanding' : properties['DocumentUnderstanding'].lower() == "true",
+        'apps' : properties['BusinessApps'].lower() == "true",
+        'asrobots' : properties['ASRobots'].lower() == "true"
+    }
+    print("Enabled services:")
+    for service, status in enabled_services_map.items():
+        print(f'{service} is enabled? {status}')
+    return enabled_services_map
+
+def get_cluster_requirments(is_multi_node: bool, enabled_services_map: dict):
+    total_cpu = 40.0 if is_multi_node else 9.5
+    total_ram = 47.6 if is_multi_node else 16.4
+    services_requirments = SERVICES_REQUIRMENTS_MAP['multi_node'] if is_multi_node else SERVICES_REQUIRMENTS_MAP['single_node']
+
+    for service, is_enabled in enabled_services_map.items():
+        if is_enabled:
+            print(f"For service {service} adding CPU { services_requirments[service]['cpu'] } to total {total_cpu}")
+            print(f"For service {service} adding RAM { services_requirments[service]['ram'] } to total {total_ram}")
+            total_cpu += services_requirments[service]['cpu']
+            total_ram += services_requirments[service]['ram']
+    return total_cpu, total_ram
 
 def get_instance_from_list(types_list: list, region: str) -> dict:
     ec2 = boto3.client('ec2', region_name=region)
@@ -48,31 +203,11 @@ def get_instance_from_list(types_list: list, region: str) -> dict:
 def create(properties, physical_id):
     region = properties["RegionName"]
     multi_node = properties["MultiNode"]
-    action_center = properties['ActionCenter']
-    test_manager = properties['TestManager']
-    insights = properties['Insights']
-    automation_hub = properties['AutomationHub']
-    automation_ops = properties['AutomationOps']
-    task_mining = properties['TaskMining']
-    ai_center = properties['AiCenter']
-    du = properties['DocumentUnderstanding']
-    apps = properties['BusinessApps']
     gpu = properties['AddGpu']
     return_attribute = dict()
 
     # datadisk size
-    if task_mining.lower() == "true" or du.lower() == "true" or \
-            ai_center.lower() == "true" or apps.lower() == "true":
-        return_attribute["ServerDiskSize"] = 2048
-    else:
-        return_attribute["ServerDiskSize"] = 512
-
-    if apps.lower() == 'true' or ai_center.lower() == 'true' or \
-            du.lower() == 'true' or task_mining.lower() == 'true':
-        is_core_platform = False
-    else:
-        is_core_platform = True
-
+    return_attribute["ServerDiskSize"] = 512
     if multi_node.lower() == 'multi node':
         is_multi_node = True
     else:
@@ -83,73 +218,60 @@ def create(properties, physical_id):
     core_single_node_types = ["c5.4xlarge", "c5a.4xlarge", "m5.4xlarge", "m5a.4xlarge"]
     ext_single_node_types = ["c5a.8xlarge", "c5.9xlarge", "m5.8xlarge"]
     tm_node_types = ["c5a.8xlarge", "c5.9xlarge", "c4.8xlarge"]
+    asrobots_node_types = ["c5.4xlarge", "c5a.4xlarge", "m5.4xlarge", "m5a.4xlarge"]
     gpu_node_types = ["p3.2xlarge", "g4dn.4xlarge", "p2.xlarge", "g5.4xlarge"]
-
-    if is_multi_node:
-        if is_core_platform:
-            total_cpu = 48
-            total_ram = 96
-            min_cpu_per_node = 16
-            min_ram_per_node = 32
-        else:
-            total_cpu = 96
-            total_ram = 192
-            min_cpu_per_node = 16
-            min_ram_per_node = 32
-    else:
-        if is_core_platform:
-            total_cpu = 16
-            total_ram = 32
-            min_cpu_per_node = 16
-            min_ram_per_node = 32
-        else:
-            total_cpu = 32
-            total_ram = 64
-            min_cpu_per_node = 32
-            min_ram_per_node = 64
+    
+    enabled_services_map = get_enabled_services_map(properties)
+    total_cpu, total_ram = get_cluster_requirments(is_multi_node, enabled_services_map)
+    # Add a 20% procent buffer for the selection
+    total_cpu *= 1.2
+    total_ram *= 1.2
+    min_cpu_per_node = 8
+    min_ram_per_node = 16
 
     min_cpu_tm_node = 20
     min_ram_tm_node = 60
+
+    min_cpu_asrobots_node = 16
+    min_ram_asrobots_node = 32
 
     min_cpu_gpu_node = 8
     min_ram_gpu_node = 52
     min_gpu_ram_gpu_node = 11
 
     if is_multi_node:
-        print("Getting instance types for multi node installation")
-        if is_core_platform:
-            print("core platform")
+        print("Getting instance types for multinode installation")
+        if total_cpu <= 48:
             instance_obj = get_instance_from_list(types_list=core_multi_node_types, region=region)
         else:
-            print("extended platform")
             instance_obj = get_instance_from_list(types_list=ext_multi_node_types, region=region)
 
         instance_cpu = instance_obj["VCpuInfo"]['DefaultVCpus']
         instance_ram = instance_obj["MemoryInfo"]['SizeInMiB'] // 1024
         if instance_ram < min_ram_per_node or instance_cpu < min_cpu_per_node:
             raise Exception("Minimum Instance HW requirements are not met")
-        initial_instance_count = max(int(math.ceil(total_cpu / instance_cpu)), int(math.ceil(total_ram / instance_ram)))
+        # There must be at least 3 servers in a multi-node deployment. As a result the # of nodes is >= 3
+        initial_instance_count = max(int(math.ceil(total_cpu / instance_cpu)), int(math.ceil(total_ram / instance_ram)), 3)
         return_attribute["ServerInstanceCount"] = 3
         return_attribute["AgentInstanceCount"] = initial_instance_count - 3
         return_attribute["InstanceType"] = instance_obj['InstanceType']
     else:
-        print("Getting instance types for single node installation")
-        if is_core_platform:
-            print("core platform")
+        print("single node")
+        if total_cpu <= 16:
+            print("small vm needed")
             instance_obj = get_instance_from_list(types_list=core_single_node_types, region=region)
         else:
-            print("extended platform")
+            print("big vm needed")
             instance_obj = get_instance_from_list(types_list=ext_single_node_types, region=region)
         instance_cpu = instance_obj["VCpuInfo"]['DefaultVCpus']
         instance_ram = instance_obj["MemoryInfo"]['SizeInMiB'] // 1024
-
         if instance_ram < total_ram or instance_cpu < total_cpu:
             raise Exception("Minimum Instance HW requirements are not met")
         return_attribute["ServerInstanceCount"] = 1
         return_attribute["AgentInstanceCount"] = 0
         return_attribute["InstanceType"] = instance_obj['InstanceType']
 
-    if task_mining.lower() == 'true':
+    if properties['TaskMining'].lower() == 'true':
         print("Adding Task Mining node")
         instance_obj = get_instance_from_list(types_list=tm_node_types, region=region)
 
@@ -160,6 +282,15 @@ def create(properties, physical_id):
         return_attribute["TmInstanceType"] = instance_obj['InstanceType']
     else:
         return_attribute["TmInstanceType"] = ""
+
+    print("Adding AS Robots node config")
+    instance_obj = get_instance_from_list(types_list=asrobots_node_types, region=region)
+
+    instance_cpu = instance_obj["VCpuInfo"]['DefaultVCpus']
+    instance_ram = instance_obj["MemoryInfo"]['SizeInMiB'] // 1024
+    if instance_ram < min_ram_asrobots_node or instance_cpu < min_cpu_asrobots_node:
+        raise Exception("Minimum Instance HW requirements are not met")
+    return_attribute["ASRobotsInstanceType"] = instance_obj['InstanceType']
 
     if gpu.lower() == 'true':
         print("Adding Gpu node")
@@ -181,31 +312,11 @@ def create(properties, physical_id):
 def update(properties, physical_id):
     region = properties["RegionName"]
     multi_node = properties["MultiNode"]
-    action_center = properties['ActionCenter']
-    test_manager = properties['TestManager']
-    insights = properties['Insights']
-    automation_hub = properties['AutomationHub']
-    automation_ops = properties['AutomationOps']
-    task_mining = properties['TaskMining']
-    ai_center = properties['AiCenter']
-    du = properties['DocumentUnderstanding']
-    apps = properties['BusinessApps']
     gpu = properties['AddGpu']
     return_attribute = dict()
 
     # datadisk size
-    if task_mining.lower() == "true" or du.lower() == "true" or \
-            ai_center.lower() == "true" or apps.lower() == "true":
-        return_attribute["ServerDiskSize"] = 2048
-    else:
-        return_attribute["ServerDiskSize"] = 512
-
-    if apps.lower() == 'true' or ai_center.lower() == 'true' or \
-            du.lower() == 'true' or task_mining.lower() == 'true':
-        is_core_platform = False
-    else:
-        is_core_platform = True
-
+    return_attribute["ServerDiskSize"] = 512
     if multi_node.lower() == 'multi node':
         is_multi_node = True
     else:
@@ -213,36 +324,25 @@ def update(properties, physical_id):
 
     core_multi_node_types = ["c5.4xlarge", "c5a.4xlarge", "m5.4xlarge", "m4.4xlarge"]
     ext_multi_node_types = ["c5a.8xlarge", "c5.9xlarge", "m5.8xlarge", "m5a.8xlarge"]
-    core_single_node_types = ["m5.4xlarge", "m5a.4xlarge", "r5.4xlarge", "r5a.4xlarge"]
-    ext_single_node_types = ["c5.12xlarge", "c5a.12xlarge", "m5.12xlarge"]
+    core_single_node_types = ["c5.4xlarge", "c5a.4xlarge", "m5.4xlarge", "m5a.4xlarge"]
+    ext_single_node_types = ["c5a.8xlarge", "c5.9xlarge", "m5.8xlarge"]
     tm_node_types = ["c5a.8xlarge", "c5.9xlarge", "c4.8xlarge"]
-    gpu_node_types = ["p3.2xlarge"]
-
-    if is_multi_node:
-        if is_core_platform:
-            total_cpu = 48
-            total_ram = 96
-            min_cpu_per_node = 16
-            min_ram_per_node = 32
-        else:
-            total_cpu = 100
-            total_ram = 224
-            min_cpu_per_node = 16
-            min_ram_per_node = 32
-    else:
-        if is_core_platform:
-            total_cpu = 16
-            total_ram = 32
-            min_cpu_per_node = 16
-            min_ram_per_node = 32
-        else:
-            total_cpu = 36
-            total_ram = 96
-            min_cpu_per_node = 36
-            min_ram_per_node = 96
+    asrobots_node_types = ["c5.4xlarge", "c5a.4xlarge", "m5.4xlarge", "m5a.4xlarge"]
+    gpu_node_types = ["p3.2xlarge", "g4dn.4xlarge", "p2.xlarge", "g5.4xlarge"]
+    
+    enabled_services_map = get_enabled_services_map(properties)
+    total_cpu, total_ram = get_cluster_requirments(is_multi_node, enabled_services_map)
+    # Add a 20% procent buffer for the selection
+    total_cpu *= 1.2
+    total_ram *= 1.2
+    min_cpu_per_node = 8
+    min_ram_per_node = 16
 
     min_cpu_tm_node = 20
     min_ram_tm_node = 60
+
+    min_cpu_asrobots_node = 16
+    min_ram_asrobots_node = 32
 
     min_cpu_gpu_node = 8
     min_ram_gpu_node = 52
@@ -250,7 +350,7 @@ def update(properties, physical_id):
 
     if is_multi_node:
         print("Getting instance types for multinode installation")
-        if is_core_platform:
+        if total_cpu <= 48:
             instance_obj = get_instance_from_list(types_list=core_multi_node_types, region=region)
         else:
             instance_obj = get_instance_from_list(types_list=ext_multi_node_types, region=region)
@@ -259,28 +359,28 @@ def update(properties, physical_id):
         instance_ram = instance_obj["MemoryInfo"]['SizeInMiB'] // 1024
         if instance_ram < min_ram_per_node or instance_cpu < min_cpu_per_node:
             raise Exception("Minimum Instance HW requirements are not met")
-        initial_instance_count = max(int(math.ceil(total_cpu / instance_cpu)), int(math.ceil(total_ram / instance_ram)))
+        # There must be at least 3 servers in a multi-node deployment. As a result the # of nodes is >= 3
+        initial_instance_count = max(int(math.ceil(total_cpu / instance_cpu)), int(math.ceil(total_ram / instance_ram)), 3)
         return_attribute["ServerInstanceCount"] = 3
         return_attribute["AgentInstanceCount"] = initial_instance_count - 3
         return_attribute["InstanceType"] = instance_obj['InstanceType']
     else:
         print("single node")
-        if is_core_platform:
-            print("core platform")
+        if total_cpu <= 16:
+            print("small vm needed")
             instance_obj = get_instance_from_list(types_list=core_single_node_types, region=region)
         else:
-            print("extended platform")
+            print("big vm needed")
             instance_obj = get_instance_from_list(types_list=ext_single_node_types, region=region)
         instance_cpu = instance_obj["VCpuInfo"]['DefaultVCpus']
         instance_ram = instance_obj["MemoryInfo"]['SizeInMiB'] // 1024
-
         if instance_ram < total_ram or instance_cpu < total_cpu:
             raise Exception("Minimum Instance HW requirements are not met")
         return_attribute["ServerInstanceCount"] = 1
         return_attribute["AgentInstanceCount"] = 0
         return_attribute["InstanceType"] = instance_obj['InstanceType']
 
-    if task_mining.lower() == 'true':
+    if properties['TaskMining'].lower() == 'true':
         print("Adding Task Mining node")
         instance_obj = get_instance_from_list(types_list=tm_node_types, region=region)
 
@@ -291,6 +391,15 @@ def update(properties, physical_id):
         return_attribute["TmInstanceType"] = instance_obj['InstanceType']
     else:
         return_attribute["TmInstanceType"] = ""
+
+    print("Adding AS Robots node config")
+    instance_obj = get_instance_from_list(types_list=asrobots_node_types, region=region)
+
+    instance_cpu = instance_obj["VCpuInfo"]['DefaultVCpus']
+    instance_ram = instance_obj["MemoryInfo"]['SizeInMiB'] // 1024
+    if instance_ram < min_ram_asrobots_node or instance_cpu < min_cpu_asrobots_node:
+        raise Exception("Minimum Instance HW requirements are not met")
+    return_attribute["ASRobotsInstanceType"] = instance_obj['InstanceType']
 
     if gpu.lower() == 'true':
         print("Adding Gpu node")
@@ -339,4 +448,5 @@ def handler(event, context):
         print('Exception: ' + str(e))
         status = cfnresponse.FAILED
     finally:
+        timer.cancel()
         cfnresponse.send(event, context, status, returnAttribute, new_physical_id)

@@ -44,6 +44,11 @@ Resources:
           FromPort: 2049
           ToPort: 2049
           CidrIp: !Ref VPCCIDR
+        - Description: rpcbind between the NFS cluster nodes
+          IpProtocol: tcp
+          FromPort: 111
+          ToPort: 111
+          CidrIp: !Ref VPCCIDR
 
   SharedStorageMountTargetOne:
     Type: AWS::EFS::MountTarget

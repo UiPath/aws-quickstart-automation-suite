@@ -14,23 +14,71 @@ Metadata:
         Parameters:
           - AvailabilityZones
           - NumberOfAZs
+          - DeployBastion
       - Label:
           default: Automation Suite instance configuration
         Parameters:
           - KeyPairName
+          - AmiId
+          - GpuAmiId
+          - IamRoleArn
+          - IamRoleName
       - Label:
           default: Automation Suite deployment configuration
         Parameters:
           - MultiNode
+          - EnableBackup
           - UseLevel7LoadBalancer
           - UiPathVersion
-          - ServiceProfile
+          - InstallerDownloadUrl
           - AddGpu
+          - ExtraConfigKeys
+          - SelfSignedCertificateValidity
+      - Label:
+          default: Automation Suite services
+        Parameters:
+          - Orchestrator
+          - ActionCenter
+          - AutomationHub
+          - AutomationOps
+          - Insights
+          - DataService
+          - TestManager
+          - AiCenter
+          - BusinessApps
+          - DocumentUnderstanding
+          - TaskMining
+          - ASRobots
+          - ProcessMining
+      - Label:
+          default: Automation Suite external Orchestrator configuration
+        Parameters:
+          - UseExternalOrchestrator
+          - OrchestratorURL
+          - IdentityURL
+          - OrchestratorCertificate
+          - IdentityCertificate
+      - Label:
+          default: Automation Suite external Orchestrator configuration
+        Parameters:
+          - UseExternalOrchestrator
+          - OrchestratorURL
+          - IdentityURL
+          - OrchestratorCertificate
+          - IdentityCertificate
       - Label:
           default: DNS or SSL configuration
         Parameters:
           - UiPathFQDN
           - HostedZoneID
+          - AcmCertificateArn
+          - UseInternalLoadBalancer
+      - Label:
+          default: RDS configuration
+        Parameters:
+          - RDSEngine
+          - RDSVersion
+          - DatabaseKmsKeyId
       - Label:
           default: Quick Start S3 bucket configuration
         Parameters:
@@ -42,22 +90,84 @@ Metadata:
         default: Availability Zones
       NumberOfAZs:
         default: Number of Availability Zones
+      DeployBastion:
+        default: Deploy Bastion host
       KeyPairName:
         default: Instance key pair
+      AmiId:
+        default: Instance AMI id
+      GpuAmiId:
+        default: GPU instance AMI id
+      IamRoleArn:
+        default: IAM Role ARN
+      IamRoleName:
+        default: IAM Role name
       MultiNode:
         default: Deployment type
+      EnableBackup:
+        default: Enable cluster backup
       UseLevel7LoadBalancer:
         default: Load Balancer
       UiPathVersion:
         default: Automation Suite version
-      ServiceProfile:
-        default: Automation Suite product selection
+      InstallerDownloadUrl:
+        default: Installer download URL
+      ExtraConfigKeys:
+        default: Extra configuration keys
+      SelfSignedCertificateValidity:
+        default: Validity of the self signed certificate
+      Orchestrator:
+        default: Orchestrator
+      ActionCenter:
+        default: Action Center
+      AutomationHub:
+        default: Automation Hub
+      AutomationOps:
+        default: Automation Ops
+      Insights:
+        default: Insights
+      TestManager:
+        default: Test Manager
+      DataService:
+        default: Data Service
+      AiCenter:
+        default: AI Center
+      BusinessApps:
+        default: Apps
+      DocumentUnderstanding:
+        default: Document Understanding
+      TaskMining:
+        default: Task Mining
+      ASRobots:
+        default: Automation Suite Robots
+      ProcessMining:
+        default: Process Mining
+      UseExternalOrchestrator:
+        default: Connect AiCenter to an external Orchestrator
+      OrchestratorURL:
+        default: Orchestrator URL
+      IdentityURL:
+        default: Identity URL
+      OrchestratorCertificate:
+        default: Base64 encoded Orchestrator certificate
+      IdentityCertificate:
+        default: Base64 encoded Identity certificate
       AddGpu:
         default: Add GPU enabled VMs
       UiPathFQDN:
         default: Hosting FQDN
       HostedZoneID:
         default: ID of Route 53 hosted zone
+      UseInternalLoadBalancer:
+        default: Use Internal Load Balancer
+      RDSEngine:
+        default: Engine of SQL Server deployed on RDS
+      RDSVersion:
+        default: Version of SQL Server deployed on RDS
+      DatabaseKmsKeyId:
+        default: KMS Key Id used to encrypt RDS storage
+      AcmCertificateArn:
+        default: ARN of the ACM hosted certificate to use
       QSS3BucketName:
         default: Template-hosting S3 bucket
       QSS3KeyPrefix:
@@ -80,6 +190,26 @@ Parameters:
   KeyPairName:
     Description: Existing key pair to connect to virtual machine (VM) instances.
     Type: 'AWS::EC2::KeyPair::KeyName'
+  AmiId:
+    Description: |
+      Enter the AMI Id to be used for the creation of the EC2 instances of the cluster.
+      Leave empty to determine automatically the AMI to use.
+    Type: String
+    Default: ''
+  GpuAmiId:
+    Description: |
+      Enter the AMI Id to be used for the creation of the GPU enabled EC2 instance.
+      Leave empty to determine automatically the AMI to use.
+    Type: String
+    Default: ''
+  IamRoleArn:
+    Description: ARN of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Type: String
+    Default: ''
+  IamRoleName:
+    Description: Name of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Type: String
+    Default: ''
   MultiNode:
     Description: Install Automation Suite on a Single Node (recommended for evaluation/dev purposes) or Multi-node (recommended for production purposes)
     Type: String
@@ -87,6 +217,13 @@ Parameters:
     AllowedValues:
       - "Single Node"
       - "Multi Node"
+  EnableBackup:
+    Description: Choose false to disable cluster backup.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
   UseLevel7LoadBalancer:
     Description: Select either an Application Load Balancer (ALB) or a Network Load Balancer (NLB)
     Type: String
@@ -97,18 +234,118 @@ Parameters:
   UiPathVersion:
     Description: UiPath version to install
     Type: String
-    Default: '2022.4.2'
+    Default: '2022.10.0'
     AllowedValues:
-      - '2022.4.2'
-  ServiceProfile:
-    Description: >-
-      Choose Default platform to install Orchestrator, Action Center, Test Manager, Insights, Automation Hub, Automation Ops, Data Service.
-      Choose Entire platform to additionally install Apps, AI Center, Task Mining, Document Understanding.
+      - '2022.10.0'
+  InstallerDownloadUrl:
+    Description: Custom URL for installer download. Leave empty to use the UiPathVersion, provide an URL to override the version.
     Type: String
-    Default: 'Default platform'
+    Default: ""
+  ExtraConfigKeys:
+    Description: Extra configuration keys to add to the cluster config. Leave empty to use default config.
+    Type: String
+    Default: ""
+  SelfSignedCertificateValidity:
+    Description: Validity of the self signed certificate in days, used by the deployment to encrypt traffic inside the VPC.
+    Type: String
+    Default: "1825"
     AllowedValues:
-      - 'Default platform'
-      - 'Entire platform'
+      - "90"
+      - "365"
+      - "730"
+      - "1825"
+      - "3650"
+  Orchestrator:
+    Description: Choose false to disable Orchestrator installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  ActionCenter:
+    Description: Choose false to disable Action Center installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  Insights:
+    Description: Choose false to disable Insights installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AutomationHub:
+    Description: Choose false to disable Automation Hub installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AutomationOps:
+    Description: Choose false to disable Automation Ops installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  TestManager:
+    Description: Choose false to disable Test Manager installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DataService:
+    Description: Choose false to disable Data Service installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AiCenter:
+    Description: Choose false to disable AI Center installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  BusinessApps:
+    Description: Choose false to disable Apps installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DocumentUnderstanding:
+    Description: Choose false to disable Document Understanding installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  TaskMining:
+    Description: Choose false to disable Task Mining installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  ASRobots: 
+    Description: Chose false to disable Automation Suite Robots installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  ProcessMining:
+    Description: Choose false to disable Process Mining installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
   AddGpu:
     Description: >-
       Choose true to add a GPU enabled VM to the deployment.
@@ -117,6 +354,34 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
+  UseExternalOrchestrator:
+    Description: >-
+      Choose true to connect AiCenter to an external Orchestrator
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  OrchestratorURL:
+    Description: >-
+      URL of the Orchestrator to which AiCenter connects
+    Type: String
+    Default: ''
+  IdentityURL:
+    Description: >-
+      URL of the Identity server used to authorize AiCenter
+    Type: String
+    Default: ''
+  OrchestratorCertificate:
+    Description: >-
+      Base64 encoded Orchestrator certificate
+    Type: String
+    Default: ''
+  IdentityCertificate:
+    Description: >-
+      Base64 encoded Identity certificate
+    Type: String
+    Default: ''
   HostedZoneID:
     Description: ID of Route 53 hosted zone. Leave empty to pause the deployment once the load balancer was created and manually configure the DNS.
     Type: String
@@ -129,6 +394,48 @@ Parameters:
     AllowedPattern: '(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{0,62}[a-zA-Z0-9]\.)+[a-zA-Z]{2,63}$)'
     ConstraintDescription: >-
       Fully qualified domain names can include numbers, lowercase letters, uppercase letters and hyphens (-).
+  AcmCertificateArn:
+    Description: |
+      ARN of certificate present in the ACM (Amazon Certificate Manager) to use with the ALB.
+      Leave empty to create the public certificate during deployment.
+    Type: String
+    Default: ""
+  UseInternalLoadBalancer:
+    Description: Deploy Internal Load Balancer
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DeployBastion:
+    Description: |
+      Deploy a bastion host inside the public subnet.
+      Choose false to skip deploying the Bastion.
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - 'true'
+      - 'false'
+  RDSEngine:
+    Type: String
+    Description: RDS MS SQL engine
+    Default: "sqlserver-se"
+    AllowedValues:
+      - "sqlserver-ee"
+      - "sqlserver-se"
+      - "sqlserver-web"
+  RDSVersion:
+    Type: String
+    Description: RDS MS SQL version
+    Default: "15.00"
+    AllowedValues:
+      - "15.00"
+      - "14.00"
+      - "13.00"
+  DatabaseKmsKeyId:
+    Type: String
+    Default: ""
+    Description: KMS Key Id to use for the encryption of the RDS storage. Leave empty to not encrypt the RDS storage
   QSS3BucketName:
     AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
     ConstraintDescription: >-
@@ -170,9 +477,6 @@ Conditions:
   3AZCondition: !Equals
     - !Ref NumberOfAZs
     - '3'
-  IsExtendedPlatform: !Equals
-    - !Ref ServiceProfile
-    - 'Entire platform'
 Resources:
   NetworkStack:
     Type: 'AWS::CloudFormation::Stack'
@@ -216,34 +520,55 @@ Resources:
           - ','
           - - !GetAtt NetworkStack.Outputs.PrivateSubnet1AID
             - !GetAtt NetworkStack.Outputs.PrivateSubnet2AID
-            - !If [3AZCondition, !GetAtt NetworkStack.Outputs.PrivateSubnet3AID, !Ref "AWS::NoValue"]
+            - !If [ 3AZCondition, !GetAtt NetworkStack.Outputs.PrivateSubnet3AID, !Ref "AWS::NoValue" ]
         PublicSubnetIDs: !Join
           - ','
           - - !GetAtt NetworkStack.Outputs.PublicSubnet1ID
             - !GetAtt NetworkStack.Outputs.PublicSubnet2ID
-            - !If [3AZCondition, !GetAtt NetworkStack.Outputs.PublicSubnet3ID, !Ref "AWS::NoValue"]
+            - !If [ 3AZCondition, !GetAtt NetworkStack.Outputs.PublicSubnet3ID, !Ref "AWS::NoValue" ]
         NumberOfAZs: !Ref NumberOfAZs
         MultiNode: !Ref MultiNode
-        EnableBackup: "true"
+        EnableBackup: !Ref EnableBackup
         UseLevel7LoadBalancer: !Ref UseLevel7LoadBalancer
         PerformInstallation: "true"
         AddGpu: !Ref AddGpu
+        GpuAmiId: !Ref GpuAmiId
+        ExtraConfigKeys: !Ref ExtraConfigKeys
+        SelfSignedCertificateValidity: !Ref SelfSignedCertificateValidity
         UiPathFQDN: !Ref UiPathFQDN
-        ActionCenter: "true"
-        AutomationHub: "true"
-        AutomationOps: "true"
-        Insights: "true"
-        DataService: "true"
-        TestManager: "true"
-        AiCenter: !If [IsExtendedPlatform, "true", "false"]
-        BusinessApps: !If [IsExtendedPlatform, "true", "false"]
-        DocumentUnderstanding: !If [IsExtendedPlatform, "true", "false"]
-        TaskMining: !If [IsExtendedPlatform, "true", "false"]
+        Orchestrator: !Ref Orchestrator
+        ActionCenter: !Ref ActionCenter
+        AutomationHub: !Ref AutomationHub
+        AutomationOps: !Ref AutomationOps
+        DataService: !Ref DataService
+        Insights: !Ref Insights
+        TestManager: !Ref TestManager
+        AiCenter: !Ref AiCenter
+        BusinessApps: !Ref BusinessApps
+        DocumentUnderstanding: !Ref DocumentUnderstanding
+        TaskMining: !Ref TaskMining
+        ASRobots: !Ref ASRobots
+        UseExternalOrchestrator: !Ref UseExternalOrchestrator
+        OrchestratorURL: !Ref OrchestratorURL
+        IdentityURL: !Ref IdentityURL
+        OrchestratorCertificate: !Ref OrchestratorCertificate
+        IdentityCertificate: !Ref IdentityCertificate
+        ProcessMining: !Ref ProcessMining
         HostedZoneID: !Ref HostedZoneID
         QSS3BucketName: !Ref QSS3BucketName
         QSS3KeyPrefix: !Ref QSS3KeyPrefix
         QSS3BucketRegion: !Ref QSS3BucketRegion
+        InstallerDownloadUrl: !Ref InstallerDownloadUrl
         UiPathVersion: !Ref UiPathVersion
+        RDSEngine: !Ref RDSEngine
+        RDSVersion: !Ref RDSVersion
+        AmiId: !Ref AmiId
+        AcmCertificateArn: !Ref AcmCertificateArn
+        UseInternalLoadBalancer: !Ref UseInternalLoadBalancer
+        DatabaseKmsKeyId: !Ref DatabaseKmsKeyId
+        DeployBastion: !Ref DeployBastion
+        IamRoleArn: !Ref IamRoleArn
+        IamRoleName: !Ref IamRoleName
         AcceptLicenseAgreement: !Ref AcceptLicenseAgreement
 
 Outputs:
@@ -292,3 +617,6 @@ Outputs:
       - ''
       - - !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/home?region=${AWS::Region}#!/secret?name="
         - !GetAtt ServiceFabricStack.Outputs.InputJsonSecret
+  ClusterAdministrationURL:
+    Description: The Unified UI for Cluster management page.
+    Value: !Sub "https://${UiPathFQDN}/uipath-management/"

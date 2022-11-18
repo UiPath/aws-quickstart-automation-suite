@@ -3,10 +3,22 @@ Description: This template creates a cluster to provide high availability. (qs-1
 Parameters:
   AgentAsgName:
     Type: String
+    Default: ''
     Description: Name of agents autoscaling group
   ServerAsgName:
     Type: String
     Description: Name of servers autoscaling group
+  AsRobotsAsgName:
+    Type: String
+    Description: Name of AS Robots autoscaling group
+  GpuAgentInstanceId:
+    Type: String
+    Default: ''
+    Description: Instance ID of the dedicated GPU node
+  TMAgentInstanceId:
+    Type: String
+    Default: ''
+    Description: Instance ID of the dedicated TM node
   InstanceAMIImageNameSSMParameter:
     Type: String
     Default: ''
@@ -20,10 +32,22 @@ Parameters:
     Description: IAM Role ARN used by the EC2 instances
   AgentLaunchTemplateName:
     Type: String
+    Default: ''
     Description: Name of agent autoscaling group launch template
+  ASRobotsLaunchTemplateName:
+    Type: String
+    Description: AS robots agent AutoScalingGroup Launch Template name
   ServerLaunchTemplateName:
     Type: String
     Description: Name of servers autoscaling group launch template
+  UseExternalOrchestrator:
+    Description: >-
+      Choose true to connect AiCenter to an external Orchestrator
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
   QSS3BucketName:
     AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
     ConstraintDescription: >-
@@ -53,17 +77,36 @@ Conditions:
   UsingDefaultBucket: !Equals
     - !Ref QSS3BucketName
     - uipath-s3-quickstart
+  IsMultiNode: !Not [ !Equals [ !Ref AgentAsgName, '' ] ]
+  UseExternalOrch: !Equals [ !Ref UseExternalOrchestrator, 'true' ]
 Resources:
 
   # CloudWatch log group for logging events from the SSM automation
   LifecycleAutomationLogs:
     Type: AWS::Logs::LogGroup
+    Condition: IsMultiNode
     Properties:
       LogGroupName: !Sub "/uipath/instance-lifecycle-ssm/${AWS::StackName}"
       RetentionInDays: 30
+  # CloudWatch log group for logging eventsfor cluster operations
+  ClusterOperationsAutomationLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/uipath/cluster-operations-ssm/${AWS::StackName}"
+      RetentionInDays: 30
+
+  AsRobotsAsgLifeCycleHookTerminating:
+    Type: 'AWS::AutoScaling::LifecycleHook'
+    Condition: IsMultiNode
+    Properties:
+      AutoScalingGroupName: !Ref AsRobotsAsgName
+      LifecycleTransition: 'autoscaling:EC2_INSTANCE_TERMINATING'
+      HeartbeatTimeout: 7200
+      DefaultResult: CONTINUE
 
   AgentAsgLifeCycleHookTerminating:
     Type: 'AWS::AutoScaling::LifecycleHook'
+    Condition: IsMultiNode
     Properties:
       AutoScalingGroupName: !Ref AgentAsgName
       LifecycleTransition: 'autoscaling:EC2_INSTANCE_TERMINATING'
@@ -72,6 +115,7 @@ Resources:
 
   ServerAsgLifeCycleHookTerminating:
     Type: 'AWS::AutoScaling::LifecycleHook'
+    Condition: IsMultiNode
     Properties:
       AutoScalingGroupName: !Ref ServerAsgName
       LifecycleTransition: 'autoscaling:EC2_INSTANCE_TERMINATING'
@@ -89,6 +133,7 @@ Resources:
             Principal:
               Service:
                 - ssm.amazonaws.com
+                - states.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyDocument:
@@ -101,7 +146,11 @@ Resources:
                   - "ssm:SendCommand"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${ServerAsgName}"
-                  - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AgentAsgName}"
+                  - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AsRobotsAsgName}"
+                  - !If
+                    - IsMultiNode
+                    - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AgentAsgName}"
+                    - !Ref AWS::NoValue
                 Effect: Allow
           PolicyName: allow-asg-instances-operations
         - PolicyDocument:
@@ -133,7 +182,11 @@ Resources:
                   - logs:CreateLogStream
                   - logs:CreateLogGroup
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LifecycleAutomationLogs}*"
+                  - !If 
+                    - IsMultiNode
+                    - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LifecycleAutomationLogs}*"
+                    - !Ref AWS::NoValue
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ClusterOperationsAutomationLogs}*"
                 Effect: Allow
           PolicyName: allow-logs-access
         - PolicyDocument:
@@ -162,15 +215,53 @@ Resources:
                   - ec2:RunInstances
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${ServerLaunchTemplateName}"
-                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${AgentLaunchTemplateName}"
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${ASRobotsLaunchTemplateName}"
+                  - !If
+                    - IsMultiNode
+                    - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${AgentLaunchTemplateName}"
+                    - !Ref AWS::NoValue
                 Effect: Allow
           PolicyName: allow-launch-template-actions
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - states:StartExecution
+                Resource:
+                  - !Ref OnDemandRestoreStateMachine
+                Effect: Allow
+          PolicyName: allow-step-function-execution
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - states:DescribeExecution
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${OnDemandRestoreStateMachine.Name}:*"
+                Effect: Allow
+          PolicyName: allow-step-function-read
+      Path: /
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMFullAccess'
+
+  StateMachinesAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+            Action: sts:AssumeRole
       Path: /
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMFullAccess'
 
   EventsBridgeAssumeRole:
     Type: AWS::IAM::Role
+    Condition: IsMultiNode
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -187,8 +278,11 @@ Resources:
               - Action:
                   - "ssm:StartautomationExecution"
                 Resource:
-                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AgentRemoveInstanceDocument}*
                   - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${ServerRemoveInstanceDocument}*
+                  - !If
+                    - IsMultiNode
+                    - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AgentRemoveInstanceDocument}*
+                    - !Ref AWS::NoValue
                 Effect: Allow
           PolicyName: startSsmExecution
         - PolicyDocument:
@@ -203,8 +297,10 @@ Resources:
 
   AgentRemoveInstanceDocument:
     Type: AWS::SSM::Document
+    Condition: IsMultiNode
     Properties:
       DocumentType: Automation
+      UpdateMethod: NewVersion
       Content:
         description: UiPath Automation Suite - remove agent instance from cluster
         schemaVersion: '0.3'
@@ -252,8 +348,10 @@ Resources:
 
   ServerRemoveInstanceDocument:
     Type: AWS::SSM::Document
+    Condition: IsMultiNode
     Properties:
       DocumentType: Automation
+      UpdateMethod: NewVersion
       Content:
         description: UiPath Automation Suite - remove agent instance from cluster
         schemaVersion: '0.3'
@@ -299,10 +397,271 @@ Resources:
               Api: "CompleteLifecycleAction"
               LifecycleActionResult: "CONTINUE"
 
+  OnDemandRestoreStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      DefinitionS3Location: 
+        Bucket: !If
+          - UsingDefaultBucket
+          - !Sub '${QSS3BucketName}-${AWS::Region}'
+          - !Ref QSS3BucketName
+        Key: !Sub "${QSS3KeyPrefix}state_machines/on_demand_restore.asl.json"
+      DefinitionSubstitutions:
+        AutomationLogs: !Ref ClusterOperationsAutomationLogs
+        S3ArtifactsPath: !Sub
+          - "https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}"
+          - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+            S3Region: !If
+              - UsingDefaultBucket
+              - !Ref AWS::Region
+              - !Ref QSS3BucketRegion
+      RoleArn: !GetAtt StateMachinesAssumeRole.Arn
+  
+  RegisterAiCenter:
+    Type: AWS::SSM::Document
+    Condition: UseExternalOrch
+    Properties:
+      DocumentType: Automation
+      UpdateMethod: NewVersion
+      Content:
+        description: UiPath Automation Suite - register to Orchestrator
+        schemaVersion: '0.3'
+        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        parameters:
+          IdentityToken:
+            type: String
+            description: 'Token used to communicate with Identity.'
+        mainSteps:
+          - name: "getFirstInstance"
+            action: "aws:executeAwsApi"
+            onFailure: Abort
+            inputs:
+              Service: autoscaling
+              Api: DescribeAutoScalingGroups
+              AutoScalingGroupNames:
+              - !Sub "${ServerAsgName}"
+            outputs:
+              - Name: firstServerInstanceId
+                Selector: $.AutoScalingGroups[0].Instances[0].InstanceId
+                Type: String
+          - name: "registerAiCenter"
+            action: "aws:runCommand"
+            onFailure: Abort
+            inputs:
+              DocumentName: "AWS-RunShellScript"
+              InstanceIds:
+                - "{{ getFirstInstance.firstServerInstanceId }}"
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Ref ClusterOperationsAutomationLogs
+              Parameters:
+                workingDirectory: '/root'
+                executionTimeout: '43200'
+                commands:
+                  - '/root/installer/configureUiPathAS.sh aicenter configure --installation-token "{{ IdentityToken }}"'
+
+  OnDemandBackup:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      UpdateMethod: NewVersion
+      Content:
+        description: UiPath Automation Suite - create a snapshot of the Automation Suite cluster
+        schemaVersion: '0.3'
+        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        mainSteps:
+          - name: "getFirstInstance"
+            action: "aws:executeAwsApi"
+            onFailure: Abort
+            inputs:
+              Service: autoscaling
+              Api: DescribeAutoScalingGroups
+              AutoScalingGroupNames:
+              - !Sub "${ServerAsgName}"
+            outputs:
+              - Name: firstServerInstanceId
+                Selector: $.AutoScalingGroups[0].Instances[0].InstanceId
+                Type: String
+          - name: "captureOnDemandBackup"
+            action: "aws:runCommand"
+            onFailure: Abort
+            inputs:
+              DocumentName: "AWS-RunShellScript"
+              InstanceIds:
+                - "{{ getFirstInstance.firstServerInstanceId }}"
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Ref ClusterOperationsAutomationLogs
+              Parameters:
+                workingDirectory: '/root'
+                executionTimeout: '43200'
+                commands:
+                  - 'timestamp=$(date +%Y%m%d%H%M%S)'
+                  - '/root/installer/configureUiPathAS.sh snapshot backup create "asbackup-ondemand-$timestamp" --wait'
+
+  OnDemandRestoreDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      UpdateMethod: NewVersion
+      Content:
+        description: UiPath Automation Suite - restores the Automation Suite cluster from a given snapshot
+        schemaVersion: '0.3'
+        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        parameters:
+          SnapshotName:
+            type: String
+            description: 'Snapshot used for the restore.'
+        mainSteps:
+          - name: "computeRestoreStepInput"
+            action: 'aws:executeScript'
+            timeoutSeconds: 600
+            maxAttempts: 1
+            onFailure: Abort
+            outputs:
+              - Name: restoreInput
+                Selector: $.Payload.restoreInput
+                Type: String
+              - Name: firstServer
+                Selector: $.Payload.firstServer
+                Type: String
+            inputs:
+              Runtime: python3.8
+              Handler: get_nodes_information
+              InputPayload:
+                ServerAsgName: !Sub '${ServerAsgName}'
+                AgentAsgName: !Sub '${AgentAsgName}'
+                AsRobotsAsgName: !Sub '${AsRobotsAsgName}'
+                GpuNode: !Sub '${GpuAgentInstanceId}'
+                TmNode: !Sub '${TMAgentInstanceId}'
+                RegionName: !Sub '${AWS::Region}'
+                SnapshotName: '{{ SnapshotName }}'
+              Script: |
+                from __future__ import print_function
+                import json
+                import boto3
+                
+                def get_instance_ids_from_asg(asg_client, asg_name):
+                  if not asg_name:
+                    return []
+                  asg_query = asg_client.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])
+                  if not len(asg_query['AutoScalingGroups']) > 0:
+                    raise Exception(f'ASG {asg_name} not found')
+                  return [instance['InstanceId'] for instance in asg_query['AutoScalingGroups'][0]['Instances']]
+                
+                def get_nodes_information(event, context):
+                  print("Received event: " + json.dumps(event, indent=2))
+                
+                  region = event["RegionName"]
+                  server_asg_name = event["ServerAsgName"]
+                  agent_asg_name = event["AgentAsgName"]
+                  as_robots_asg_name = event["AsRobotsAsgName"]
+                  gpu_node_id = event["GpuNode"]
+                  tm_node_id = event["TmNode"]
+                  snapshot_name = event["SnapshotName"]
+                
+                  ec2 = boto3.client("ec2", region)
+                  asg = boto3.client("autoscaling", region)
+                
+                  servers = get_instance_ids_from_asg(asg_client=asg, asg_name=server_asg_name)
+                  agents = get_instance_ids_from_asg(asg_client=asg, asg_name=agent_asg_name)
+                  as_robots = get_instance_ids_from_asg(asg_client=asg, asg_name=as_robots_asg_name)
+                  all_instances = list(servers)
+                  secondary_instances = [{'nodeType': 'server', 'instanceId': instanceId} for instanceId in servers[1:]]
+                  if len(agents) > 0:
+                    all_instances += agents
+                    secondary_instances += [{'nodeType': 'agent', 'instanceId': instanceId} for instanceId in agents]
+                  if len(as_robots) > 0:
+                    all_instances += as_robots
+                    secondary_instances += [{'nodeType': 'asrobots', 'instanceId': instanceId} for instanceId in as_robots]
+                  if gpu_node_id:
+                    all_instances.append(gpu_node_id)
+                    secondary_instances.append({'nodeType': 'gpu', 'instanceId': gpu_node_id})
+                  if tm_node_id:
+                    all_instances.append(tm_node_id)
+                    secondary_instances.append({'nodeType': 'task-mining', 'instanceId': tm_node_id})
+                  
+                  restore_input = {
+                    'snapshotName': snapshot_name,
+                    'allInstances': all_instances,
+                    'firstServer': servers[0],
+                    'secondaryServers': servers[1:],
+                    'agents': agents,
+                    'asRobots': as_robots,
+                    'secondaryInstances': secondary_instances
+                  }
+
+                  return {'restoreInput': json.dumps(restore_input), 'firstServer': servers[0]}
+
+          - name: "checkSnapshotExists"
+            action: "aws:runCommand"
+            onFailure: Abort
+            inputs:
+              DocumentName: "AWS-RunShellScript"
+              InstanceIds:
+                - "{{ computeRestoreStepInput.firstServer }}"
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Ref ClusterOperationsAutomationLogs
+              Parameters:
+                workingDirectory: '/root'
+                executionTimeout: '43200'
+                commands:
+                  - 'set -e'
+                  - 'echo "Checking if snapshot {{ SnapshotName }} exists..."'
+                  - '/root/installer/configureUiPathAS.sh snapshot list | grep -w "{{ SnapshotName }}"'
+          - name: "runRestoreStepFunction"
+            action: "aws:executeStateMachine"
+            onFailure: Abort
+            inputs:
+              stateMachineArn: !Ref OnDemandRestoreStateMachine
+              input: '{{ computeRestoreStepInput.restoreInput }}'
+  GetBackupList:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      UpdateMethod: NewVersion
+      Content:
+        description: UiPath Automation Suite - get the list of avaliable snapshots of the Automation Suite cluster
+        schemaVersion: '0.3'
+        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        mainSteps:
+          - name: "getFirstInstance"
+            action: "aws:executeAwsApi"
+            onFailure: Abort
+            inputs:
+              Service: autoscaling
+              Api: DescribeAutoScalingGroups
+              AutoScalingGroupNames:
+              - !Sub "${ServerAsgName}"
+            outputs:
+              - Name: firstServerInstanceId
+                Selector: $.AutoScalingGroups[0].Instances[0].InstanceId
+                Type: String
+          - name: "getSnapshotList"
+            action: "aws:runCommand"
+            onFailure: Abort
+            inputs:
+              DocumentName: "AWS-RunShellScript"
+              InstanceIds:
+                - "{{ getFirstInstance.firstServerInstanceId }}"
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Ref ClusterOperationsAutomationLogs
+              Parameters:
+                workingDirectory: '/root'
+                executionTimeout: '43200'
+                commands:
+                  - '/root/installer/configureUiPathAS.sh snapshot list'
+  
   UpdateAMIDocument:
     Type: AWS::SSM::Document
     Properties:
       DocumentType: Automation
+      UpdateMethod: NewVersion
       Content:
         description: UiPath Automation Suite - update AMI for the scalling groups
         schemaVersion: '0.3'
@@ -338,6 +697,7 @@ Resources:
                 Owners: '309956199498'
                 ServerAsgName: !Ref ServerAsgName
                 AgentAsgName: !Ref AgentAsgName
+                AsRobotsAsgName: !Ref AsRobotsAsgName
                 InstanceAMIIdSSMParameter: !Ref InstanceAMIIdSSMParameter
                 InstanceAMIImageNameSSMParameter: !Ref InstanceAMIImageNameSSMParameter
                 
@@ -432,11 +792,38 @@ Resources:
                     update_ssm_parameter(event["InstanceAMIImageNameSSMParameter"], image_name, ssm)
                 
                   update_asg_launch_template(event["ServerAsgName"], image_id, asg, ec2)
-                  update_asg_launch_template(event["AgentAsgName"], image_id, asg, ec2)
+                  update_asg_launch_template(event["AsRobotsAsgName"], image_id, asg, ec2)
+                  if event["AgentAsgName"]:
+                    update_asg_launch_template(event["AgentAsgName"], image_id, asg, ec2)
                   return response
+
+  AsRobotsTerminateEventRule:
+    Type: AWS::Events::Rule
+    Condition: IsMultiNode
+    Properties:
+      EventPattern:
+        source:
+          - "aws.autoscaling"
+        detail-type:
+          - "EC2 Instance-terminate Lifecycle Action"
+        detail:
+          AutoScalingGroupName:
+            - !Ref AsRobotsAsgName
+      State: "ENABLED"
+      Targets:
+        - Arn: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AgentRemoveInstanceDocument}:$DEFAULT"
+          Id: ASRobots-Termination
+          RoleArn: !GetAtt EventsBridgeAssumeRole.Arn
+          InputTransformer:
+            InputPathsMap:
+              instance_id: $.detail.EC2InstanceId
+              asg_name: "$.detail.AutoScalingGroupName"
+              lch_name: "$.detail.LifecycleHookName"
+            InputTemplate: '{"InstanceId":[<instance_id>],"AutoScalingGroupName":[<asg_name>],"LifecycleHookName":[<lch_name>]}'
 
   AgentTerminateEventRule:
     Type: AWS::Events::Rule
+    Condition: IsMultiNode
     Properties:
       EventPattern:
         source:
@@ -460,6 +847,7 @@ Resources:
 
   ServerTerminateEventRule:
     Type: AWS::Events::Rule
+    Condition: IsMultiNode
     Properties:
       EventPattern:
         source:

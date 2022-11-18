@@ -29,7 +29,7 @@ function install_agent() {
   sleep 300
 
   [[ "${registration_status}" == "200" ]] || (echo "Primary server failed to start" && exit 1)
-  /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k -j gpu --accept-license-agreement --skip-pre-reqs
+  /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k -j gpu --accept-license-agreement
 }
 
 function main() {

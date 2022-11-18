@@ -41,6 +41,9 @@ Parameters:
   TmInstanceType:
     Description: Task Mining node Instance type
     Type: String
+  ASRobotsInstanceType:
+    Description: Automation Suite Robots nodes Instance type
+    Type: String
   GpuInstanceType:
     Description: Gpu node Instance type
     Type: String
@@ -68,6 +71,31 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
+  ASRobots: 
+    Description: Chose false to disable Automation Suite Robots installation.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  UseExternalOrchestrator:
+    Description: >-
+      Choose true to connect AiCenter to an external Orchestrator
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  OrchestratorCertificate:
+    Description: >-
+      Base64 encoded Orchestrator certificate
+    Type: String
+    Default: ''
+  IdentityCertificate:
+    Description: >-
+      Base64 encoded Identity certificate
+    Type: String
+    Default: ''
   AddGpu:
     Description: >-
       Choose true to add GPU VMs to the deployment.
@@ -135,6 +163,12 @@ Conditions:
   InstallingTaskMining: !Equals
     - !Ref TaskMining
     - "true"
+  InstallingASRobots: !Equals
+    - !Ref ASRobots
+    - "true"
+  UseExternalOrch: !Equals 
+    - !Ref UseExternalOrchestrator
+    - "true"
   DeployingGpu: !Equals
     - !Ref AddGpu
     - "true"
@@ -153,6 +187,12 @@ Conditions:
     - !Equals ["", !Ref IamRoleArn]
     - !Equals ["", !Ref IamRoleName]
   IsBackupEnabled: !Not [ !Equals [ !Ref BackupFileSystemDns, "" ] ]
+  IsASRobotsProduction: !And
+    - !Condition InstallingASRobots
+    - !Condition IsMultiNode
+  IsASRobotsEval: !And
+    - !Condition InstallingASRobots
+    - !Not [!Condition IsMultiNode]
 Resources:
   ServiceFabricSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
@@ -208,7 +248,7 @@ Resources:
     Properties:
       Name: !Sub "/${AWS::StackName}/InstanceAMIImageName"
       Type: String
-      Value: RHEL-8.3*_HVM-20*
+      Value: RHEL-8.6*_HVM-20*
       Description: SSM Parameter for storing the Image Name of the AMI used in the ASGs.
   
   InstanceAmiId:
@@ -236,7 +276,7 @@ Resources:
     Properties:
       ServiceToken: !Ref FindAMIFunctionArn
       RegionName: !Ref 'AWS::Region'
-      ImageName: RHEL-8.2*_HVM-20*
+      ImageName: RHEL-8.6*_HVM-20*
       Architecture: x86_64
       VirtualizationType: hvm
       Owners: '309956199498'
@@ -308,6 +348,7 @@ Resources:
                 - IsMultiNode
                 - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AgentAutoScalingGroup}"
                 - !Ref AWS::NoValue
+              - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${ASRobotsAutoScalingGroup}"
             Effect: Allow
       PolicyName: LifecycleHookActionsPolicy
       Roles:
@@ -421,6 +462,10 @@ Resources:
             - install_ssm_agent
             - download_sf
             - disk_setup
+            - !If 
+              - UseExternalOrch
+              - external_orch_cert_config
+              - !Ref "AWS::NoValue"
             - install_server
         disk_setup:
           files:
@@ -509,14 +554,12 @@ Resources:
             /root/installer/backup.json:
               content: !Sub |
                 {
-                  "backup": {
-                    "etcdBackupPath": "/backup",
-                    "nfs": {
-                      "endpoint": "${BackupFileSystemDns}",
-                      "mountpath": "/"
-                    }
-                  },
-                  "backup_interval": "720"
+                  "target": "nfs",
+                  "endpoint": "${BackupFileSystemDns}",
+                  "location": "/",
+                  "prefix": "asbackup",
+                  "schedule": "*/45 * * * *",
+                  "retention": "72h"
                 }
               owner: "root"
               group: "root"
@@ -531,7 +574,9 @@ Resources:
               group: "root"
               mode: "000700"
           commands:
-            01_install_server:
+            01_install_prerequisites:
+              command: /root/installer/validateUiPathASReadiness.sh install-packages --install-type online
+            02_install_server:
               command: !If
                 - IsPerformingInstallation
                 - !If
@@ -584,6 +629,12 @@ Resources:
             02_start_cw_agent:
               command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
               ignoreErrors: "true"
+        external_orch_cert_config:
+          commands:
+            01_populate_orch_cert:
+              command: !Sub 'echo "${OrchestratorCertificate}" | base64 -d > /root/installer/orchestrator.cer'
+            02_populate_identity_cert:
+              command: !Sub 'echo "${IdentityCertificate}" | base64 -d > /root/installer/identity.cer'
 
     Properties:
       LaunchTemplateData:
@@ -606,12 +657,28 @@ Resources:
               Encrypted: true
               VolumeSize: 16
               VolumeType: gp3
+          - DeviceName: /dev/sdf
+            Ebs:
+              DeleteOnTermination: false
+              Encrypted: true
+              VolumeSize: 512
+              VolumeType: gp3
           - DeviceName: /dev/sdd
             Ebs:
               DeleteOnTermination: true
               Encrypted: true
               VolumeSize: 256
               VolumeType: gp3
+          - !If
+            - IsASRobotsEval
+            - DeviceName: /dev/sde
+              Ebs:
+                DeleteOnTermination: true
+                Encrypted: true
+                VolumeSize: 32
+                VolumeType: gp3
+            - !Ref "AWS::NoValue"
+          
         ImageId: !Sub '{{resolve:ssm:${InstanceAmiId}}}'
         IamInstanceProfile:
           Arn: !GetAtt ServiceFabricInstanceProfile.Arn
@@ -622,7 +689,6 @@ Resources:
         UserData: !Base64
           Fn::Sub: |
             #!/bin/bash -x
-            dnf update -y
             dnf install -y python3
             dnf install -y wget unzip jq
             mkdir -p /opt/aws/bin
@@ -656,6 +722,217 @@ Resources:
   AgentLaunchConfiguration:
     Type: 'AWS::EC2::LaunchTemplate'
     Condition: IsMultiNode
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        S3AccessCreds:
+          type: S3
+          roleName: !If [DeployIam, !Ref ServiceFabricIamRole, !Ref IamRoleName]
+          buckets: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+            - aws_cli_setup
+            - cloudwatch_agent_setup
+            - install_ssm_agent
+            - download_sf
+            - disk_setup
+            - !If 
+              - UseExternalOrch
+              - external_orch_cert_config
+              - !Ref "AWS::NoValue"
+            - install_agent
+        disk_setup:
+          files:
+            /root/init-disk.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/init-disk.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+            /root/ebsnvme-id.py:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/ebsnvme-id.py'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_execute_prereqs:
+              command: dnf -y install unzip jq tree lvm2 bc
+            02_execute_init_disk:
+              command: /root/init-disk.sh
+        aws_cli_setup:
+          files:
+            /tmp/awscliv2.zip:
+              source: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+          commands:
+            01_unzip_cli:
+              command: unzip -o /tmp/awscliv2.zip -d /tmp
+            02_install_cli:
+              command: /tmp/aws/install --update
+        install_ssm_agent:
+          commands:
+            01enable_ssm_agent:
+              command: !Sub 'dnf install -y https://s3.${AWS::Region}.amazonaws.com/amazon-ssm-${AWS::Region}/latest/linux_amd64/amazon-ssm-agent.rpm'
+              ignoreErrors: "true"
+            02enable_ssm_agent:
+              command: systemctl enable amazon-ssm-agent
+              ignoreErrors: "true"
+            03start_ssm_agent:
+              command: systemctl start amazon-ssm-agent
+              ignoreErrors: "true"
+        download_sf:
+          files:
+            /root/download-sf-installer.sh:
+              content: !Sub |
+                #!/bin/bash -x
+                wget "$(aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
+              owner: "root"
+              group: "root"
+              mode: "00700"
+            /root/download-kubeconfig.sh:
+              content: !Sub |
+                #!/bin/bash -x
+                /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${KubeconfigSecretArn}" | jq -r '.SecretString' > /root/kubeconfig.yaml
+              owner: "root"
+              group: "root"
+              mode: "00700"
+          commands:
+            01_download_installer:
+              command: /root/download-sf-installer.sh
+            02_unzip_installer:
+              command: unzip -o /root/sf-installer.zip -d /root/installer
+            03_set_permissions:
+              command: chmod -R +r,+w,+x /root/installer/*
+            04_download_input:
+              command: !Sub /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${InputJsonSecretArn}" | jq '.SecretString | fromjson' > /root/installer/input.json
+        install_agent:
+          files:
+            /root/install-agent.sh:
+              source: !Sub
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-agent.sh'
+                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              authentication: S3AccessCreds
+              owner: "root"
+              group: "root"
+              mode: "000700"
+          commands:
+            01_install_prerequisites:
+              command: /root/installer/validateUiPathASReadiness.sh install-packages --install-type online
+            02_install_agent:
+              command: !If
+                - IsPerformingInstallation
+                - (trap "" SIGPIPE; export HOME="/root"; /root/install-agent.sh --node-role "agent")
+                - echo "Done"
+        cloudwatch_agent_setup:
+          files:
+            /tmp/amazon-cloudwatch-agent.rpm:
+              source: "https://s3.amazonaws.com/amazoncloudwatch-agent/redhat/amd64/latest/amazon-cloudwatch-agent.rpm"
+            /opt/aws/amazon-cloudwatch-agent/config.json:
+              content: !Sub |
+                {
+                  "logs": {
+                    "logs_collected": {
+                      "files": {
+                        "collect_list": [
+                          {
+                            "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "amazon-cloudwatch-agent.log"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init"
+                          },
+                          {
+                            "file_path": "/var/log/cfn-init-cmd.log",
+                            "log_group_name": "/aws/ec2/${AWS::StackName}/{instance_id}",
+                            "log_stream_name": "cfn-init-cmd"
+                          }
+                        ]
+                      }
+                    },
+                    "log_stream_name": "default.log",
+                    "force_flush_interval" : 15
+                  }
+                }
+          commands:
+            01_install_cw_agent:
+              command: if rpm -ivh --test /tmp/amazon-cloudwatch-agent.rpm; then rpm -U /tmp/amazon-cloudwatch-agent.rpm; else echo "CW agent already installed"; fi
+              ignoreErrors: "true"
+            02_start_cw_agent:
+              command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
+              ignoreErrors: "true"
+        external_orch_cert_config:
+          commands:
+            01_populate_orch_cert:
+              command: !Sub 'echo "${OrchestratorCertificate}" | base64 -d > /root/installer/orchestrator.cer'
+            02_populate_identity_cert:
+              command: !Sub 'echo "${IdentityCertificate}" | base64 -d > /root/installer/identity.cer'
+
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 128
+              VolumeType: gp3
+          - DeviceName: /dev/sdd
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 256
+              VolumeType: gp3
+        ImageId: !Sub '{{resolve:ssm:${InstanceAmiId}}}'
+        IamInstanceProfile:
+          Arn: !GetAtt ServiceFabricInstanceProfile.Arn
+        InstanceType: !Ref InstanceType
+        KeyName: !If [HasKeyName, !Ref KeyPairName, !Ref "AWS::NoValue"]
+        SecurityGroupIds:
+          - !GetAtt ServiceFabricSecurityGroup.GroupId
+        UserData: !Base64
+          Fn::Sub: |
+            #!/bin/bash -x
+            dnf install -y python3
+            dnf install -y wget unzip jq
+            mkdir -p /opt/aws/bin
+            wget -O /tmp/aws-cfn-bootstrap-py3-latest.tar.gz https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+            python3 -m easy_install --script-dir /opt/aws/bin /tmp/aws-cfn-bootstrap-py3-latest.tar.gz
+            /opt/aws/bin/cfn-init -v \
+                     --stack ${AWS::StackName} \
+                     --resource AgentLaunchConfiguration \
+                     --configsets config \
+                     --region ${AWS::Region}
+            init_exit_code=$?
+            /opt/aws/bin/cfn-signal -e $init_exit_code \
+                     --stack ${AWS::StackName } \
+                     --resource AgentAutoScalingGroup \
+                     --region ${AWS::Region }
+            
+            if [ $init_exit_code -eq 0 ]; then
+              lifecycle_action="CONTINUE"
+            else
+              lifecycle_action="ABANDON"
+            fi
+            metadata_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+            instance_id=$(curl -H "X-aws-ec2-metadata-token: $metadata_token" -s http://169.254.169.254/latest/meta-data/instance-id)
+            asg_name=$(/usr/local/bin/aws autoscaling describe-auto-scaling-instances --instance-ids "$instance_id" --query 'AutoScalingInstances[*].AutoScalingGroupName' --output text)
+            /usr/local/bin/aws autoscaling complete-lifecycle-action --lifecycle-action-result "$lifecycle_action" \
+                                                                     --lifecycle-hook-name ${AWS::StackName}-AgentInstallFinishedHook \
+                                                                     --auto-scaling-group-name "$asg_name" \
+                                                                     --instance-id "$instance_id"
+
+  ASRobotsLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
     Metadata:
       AWS::CloudFormation::Authentication:
         S3AccessCreds:
@@ -753,10 +1030,12 @@ Resources:
               group: "root"
               mode: "000700"
           commands:
-            01_install_agent:
+            01_install_prerequisites:
+              command: /root/installer/validateUiPathASReadiness.sh install-packages --install-type online
+            02_install_agent:
               command: !If
                 - IsPerformingInstallation
-                - (trap "" SIGPIPE; export HOME="/root"; /root/install-agent.sh)
+                - (trap "" SIGPIPE; export HOME="/root"; /root/install-agent.sh --node-role "asrobots")
                 - echo "Done"
         cloudwatch_agent_setup:
           files:
@@ -814,17 +1093,22 @@ Resources:
               Encrypted: true
               VolumeSize: 256
               VolumeType: gp3
+          - DeviceName: /dev/sde
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 32
+              VolumeType: gp3
         ImageId: !Sub '{{resolve:ssm:${InstanceAmiId}}}'
         IamInstanceProfile:
           Arn: !GetAtt ServiceFabricInstanceProfile.Arn
-        InstanceType: !Ref InstanceType
+        InstanceType: !Ref ASRobotsInstanceType
         KeyName: !If [HasKeyName, !Ref KeyPairName, !Ref "AWS::NoValue"]
         SecurityGroupIds:
           - !GetAtt ServiceFabricSecurityGroup.GroupId
         UserData: !Base64
           Fn::Sub: |
             #!/bin/bash -x
-            dnf update -y
             dnf install -y python3
             dnf install -y wget unzip jq
             mkdir -p /opt/aws/bin
@@ -832,13 +1116,13 @@ Resources:
             python3 -m easy_install --script-dir /opt/aws/bin /tmp/aws-cfn-bootstrap-py3-latest.tar.gz
             /opt/aws/bin/cfn-init -v \
                      --stack ${AWS::StackName} \
-                     --resource AgentLaunchConfiguration \
+                     --resource ASRobotsLaunchTemplate \
                      --configsets config \
                      --region ${AWS::Region}
             init_exit_code=$?
-            /opt/aws/bin/cfn-signal -e init_exit_code \
+            /opt/aws/bin/cfn-signal -e $init_exit_code \
                      --stack ${AWS::StackName } \
-                     --resource AgentAutoScalingGroup \
+                     --resource ASRobotsAutoScalingGroup \
                      --region ${AWS::Region }
             
             if [ $init_exit_code -eq 0 ]; then
@@ -850,7 +1134,7 @@ Resources:
             instance_id=$(curl -H "X-aws-ec2-metadata-token: $metadata_token" -s http://169.254.169.254/latest/meta-data/instance-id)
             asg_name=$(/usr/local/bin/aws autoscaling describe-auto-scaling-instances --instance-ids "$instance_id" --query 'AutoScalingInstances[*].AutoScalingGroupName' --output text)
             /usr/local/bin/aws autoscaling complete-lifecycle-action --lifecycle-action-result "$lifecycle_action" \
-                                                                     --lifecycle-hook-name ${AWS::StackName}-AgentInstallFinishedHook \
+                                                                     --lifecycle-hook-name ${AWS::StackName}-ASRobotsInstallFinishedHook \
                                                                      --auto-scaling-group-name "$asg_name" \
                                                                      --instance-id "$instance_id"
 
@@ -920,6 +1204,47 @@ Resources:
         - !Ref KubeTargetGroupArn
         - !Ref Rke2RegistrationTargetGroupArn
       VPCZoneIdentifier: !Ref PrivateSubnetIDs
+
+  ASRobotsAutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    CreationPolicy:
+      ResourceSignal:
+        Count: !If [IsASRobotsProduction, '1', '0']
+        Timeout: PT2H
+    Properties:
+      DesiredCapacity: !If [IsASRobotsProduction, '1', '0']
+      HealthCheckType: EC2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ASRobotsLaunchTemplate
+        Version: !GetAtt
+          - ASRobotsLaunchTemplate
+          - LatestVersionNumber
+      MaxSize: !If [IsASRobotsProduction, '1', '0']
+      MetricsCollection:
+        - Granularity: 1Minute
+          Metrics:
+            - GroupMinSize
+            - GroupMaxSize
+            - GroupDesiredCapacity
+            - GroupInServiceInstances
+            - GroupTotalInstances
+      MinSize: !If [IsASRobotsProduction, '1', '0']
+      Tags:
+        - Key: Name
+          PropagateAtLaunch: true
+          Value: 'UIPath-ServiceFabric-ASRobots'
+      TargetGroupARNs:
+        - !Ref DeploymentTargetGroupArn
+      VPCZoneIdentifier: !Ref PrivateSubnetIDs
+
+  ASRobotsAsgLifeCycleHookLaunching:
+    Type: "AWS::AutoScaling::LifecycleHook"
+    Properties:
+      LifecycleHookName: !Sub "${AWS::StackName}-ASRobotsInstallFinishedHook"
+      AutoScalingGroupName: !Ref ASRobotsAutoScalingGroup
+      LifecycleTransition: "autoscaling:EC2_INSTANCE_LAUNCHING"
+      HeartbeatTimeout: 7200
+      DefaultResult: ABANDON
 
   AgentAsgLifeCycleHookLaunching:
     Type: "AWS::AutoScaling::LifecycleHook"
@@ -1089,7 +1414,6 @@ Resources:
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash -x
-          dnf update -y
           dnf install -y python3
           dnf install -y wget unzip jq
           mkdir -p /opt/aws/bin
@@ -1127,6 +1451,10 @@ Resources:
             - install_ssm_agent
             - download_sf
             - disk_setup
+            - !If 
+              - UseExternalOrch
+              - external_orch_cert_config
+              - !Ref "AWS::NoValue"
             - install_tm
         disk_setup:
           files:
@@ -1200,9 +1528,9 @@ Resources:
               command: !Sub /usr/local/bin/aws secretsmanager get-secret-value --secret-id "${InputJsonSecretArn}" | jq '.SecretString | fromjson' > /root/installer/input.json
         install_tm:
           files:
-            /root/install-tm.sh:
+            /root/install-agent.sh:
               source: !Sub
-                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-tm.sh'
+                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-agent.sh'
                 - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
                   S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
               authentication: S3AccessCreds
@@ -1210,10 +1538,12 @@ Resources:
               group: "root"
               mode: "000700"
           commands:
-            01_install_agent:
+            01_install_prerequisites:
+              command: /root/installer/validateUiPathASReadiness.sh install-packages --install-type online
+            02_install_agent:
               command: !If
                 - IsPerformingInstallation
-                - (trap "" SIGPIPE; export HOME="/root"; /root/install-tm.sh)
+                - (trap "" SIGPIPE; export HOME="/root"; /root/install-agent.sh --node-role "task-mining")
                 - echo "Done"
         cloudwatch_agent_setup:
           files:
@@ -1255,6 +1585,12 @@ Resources:
             02_start_cw_agent:
               command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
               ignoreErrors: "true"
+        external_orch_cert_config:
+          commands:
+            01_populate_orch_cert:
+              command: !Sub 'echo "${OrchestratorCertificate}" | base64 -d > /root/installer/orchestrator.cer'
+            02_populate_identity_cert:
+              command: !Sub 'echo "${IdentityCertificate}" | base64 -d > /root/installer/identity.cer'
 
     CreationPolicy:
       ResourceSignal:
@@ -1288,7 +1624,6 @@ Resources:
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash -x
-          dnf update -y
           dnf install -y python3
           dnf install -y wget unzip jq
           mkdir -p /opt/aws/bin
@@ -1326,6 +1661,10 @@ Resources:
             - install_ssm_agent
             - download_sf
             - disk_setup
+            - !If 
+              - UseExternalOrch
+              - external_orch_cert_config
+              - !Ref "AWS::NoValue"
             - install_gpu_drivers
         disk_setup:
           files:
@@ -1490,31 +1829,22 @@ Resources:
               mode: "000700"
 
           commands:
-            01_create_service:
+            01_install_prerequisites:
+              command: /root/installer/validateUiPathASReadiness.sh install-packages --install-type online
+            02_create_service:
               command: systemctl enable install-gpu
-            02_install_kernel:
+            03_install_kernel:
               command: yum install -y kernel kernel-tools kernel-headers kernel-devel
-            03_reboot:
+            04_reboot:
               command: reboot
-            04_wait_reboot:
+            05_wait_reboot:
               command: date && sleep 60
-        install_agent:
-          files:
-            /root/install-agent.sh:
-              source: !Sub
-                - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}scripts/install-agent.sh'
-                - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
-                  S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
-              authentication: S3AccessCreds
-              owner: "root"
-              group: "root"
-              mode: "000700"
+        external_orch_cert_config:
           commands:
-            01_install_agent:
-              command: !If
-                - IsPerformingInstallation
-                - (trap "" SIGPIPE; export HOME="/root"; /root/install-agent.sh)
-                - echo "Done"
+            01_populate_orch_cert:
+              command: !Sub 'echo "${OrchestratorCertificate}" | base64 -d > /root/installer/orchestrator.cer'
+            02_populate_identity_cert:
+              command: !Sub 'echo "${IdentityCertificate}" | base64 -d > /root/installer/identity.cer'
 
     CreationPolicy:
       ResourceSignal:
@@ -1574,18 +1904,28 @@ Outputs:
     Value: !Ref InstanceAmiId
   AgentAsgName:
     Description: Agent AutoScalingGroup name
-    Value: !Ref AgentAutoScalingGroup
-    Condition: IsMultiNode
+    Value: !If [IsMultiNode, !Ref AgentAutoScalingGroup, ''] 
   ServerAsgName:
     Description: Server AutoScalingGroup name
     Value: !Ref ServerAutoScalingGroup
+  AsRobotsAsgName:
+    Description: AS Robots AutoScalingGroup name
+    Value: !Ref ASRobotsAutoScalingGroup
+  GpuAgentInstanceId:
+    Description: Instance ID of the dedicated GPU node
+    Value: !If [DeployingGpu, !Ref GpuEnabledNode, '']
+  TMAgentInstanceId:
+    Description: Instance ID of the dedicated TM node
+    Value: !If [InstallingTaskMining, !Ref TaskMiningNode, '']
   ServerLaunchTemplateName:
     Description: Server AutoScalingGroup Launch Template name
     Value: !Ref ServerLaunchConfiguration
   AgentLaunchTemplateName:
     Description: Agent AutoScalingGroup Launch Template name
-    Value: !Ref AgentLaunchConfiguration
-    Condition: IsMultiNode
+    Value: !If [IsMultiNode, !Ref AgentLaunchConfiguration, ''] 
+  ASRobotsLaunchTemplateName:
+    Description: AS robots agent AutoScalingGroup Launch Template name
+    Value: !Ref ASRobotsLaunchTemplate
   InstanceIamRoleArn:
     Description: Iam Role used by deployed EC2 instamces
     Value: !If [DeployIam, !GetAtt ServiceFabricIamRole.Arn, !Ref IamRoleArn]

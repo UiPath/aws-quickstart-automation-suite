@@ -80,4 +80,5 @@ def handler(event, context):
         print('Exception: ' + str(e))
         status = cfnresponse.FAILED
     finally:
+        timer.cancel()
         cfnresponse.send(event, context, status, returnAttribute, new_physical_id)

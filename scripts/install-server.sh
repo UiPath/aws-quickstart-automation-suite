@@ -78,6 +78,23 @@ function check_registration() {
   fi
 }
 
+function update_efs_permissions() {
+  local nfs_endpoint=$1
+  local local_path="/mnt/asbackup_permissions"
+  # mount nfs server to client
+  echo "Create temporary mount for ${nfs_endpoint} at ${local_path}"
+  mkdir -p "$local_path"
+  mount -t nfs "${nfs_endpoint}":"/" "${local_path}"
+
+  echo "Update file system permissions"
+  chown -R nobody: "${local_path}"
+  chmod -R 777 "${local_path}"
+
+  echo "Umount temporary mount"
+  umount -l "${local_path}"
+  rm -rf "${local_path}"
+}
+
 function main() {
   NODE_TYPE="FIRST_SERVER"
   local registration_url
@@ -102,7 +119,7 @@ function main() {
     while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
       echo "Trying to install the infra ==== ${try}/${maxtry}"
       try=$((try + 1))
-      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k --accept-license-agreement --skip-pre-reqs --skip-compare-config && status="ready"
+      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k --accept-license-agreement --skip-compare-config && status="ready"
     done
 
     [[ "${status}" == "ready" ]] || (echo "Failed to install infra" && exit 1)
@@ -134,7 +151,7 @@ function main() {
     while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
       echo "Trying to install the fabric ==== ${try}/${maxtry}"
       try=$((try + 1))
-      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -f --accept-license-agreement --skip-pre-reqs --skip-compare-config && status="ready"
+      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -f --accept-license-agreement --skip-compare-config && status="ready"
     done
 
     [[ "${status}" == "ready" ]] || (echo "Failed to install fabric" && exit 1)
@@ -145,21 +162,35 @@ function main() {
     while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
       echo "Trying to install the services ==== ${try}/${maxtry}"
       try=$((try + 1))
-      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -s --accept-license-agreement --skip-pre-reqs --skip-compare-config && status="ready"
+      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -s --accept-license-agreement --skip-compare-config && status="ready"
     done
     [[ "${status}" == "ready" ]] || (echo "Failed to install services" && exit 1)
 
     if ((SETUPBACKUP == 1)); then
+      local backup_file="/root/installer/backup.json"
+      local backup_target=$(jq -r '.target' $backup_file)
+      local backup_endpoint=$(jq -r '.endpoint' $backup_file)
+      local backup_location=$(jq -r '.location' $backup_file)
+      local backup_prefix=$(jq -r '.prefix' $backup_file)
+      local backup_schedule=$(jq -r '.schedule' $backup_file)
+      local backup_retention=$(jq -r '.retention' $backup_file)
+
       try=0
       maxtry=2
-
       status="notready"
       while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
-        echo "Trying to enable backup ==== ${try}/${maxtry}"
-        try=$((try + 1))
-        /root/installer/install-uipath.sh -i /root/installer/backup.json -o /root/installer/output-backup.json -b --accept-license-agreement && status="ready"
+        echo "Trying to configure backup ==== ${try}/${maxtry}"
+        update_efs_permissions "$backup_endpoint"
+        /root/installer/configureUiPathAS.sh snapshot config --target "$backup_target" \
+                                                            --endpoint "$backup_endpoint" \
+                                                            --location "$backup_location" \
+                                                            --prefix "$backup_prefix" \
+                                                            --schedule "$backup_schedule" \
+                                                            --retention "$backup_retention" && status="ready"
+      try=$((try + 1))
       done
-      [[ "${status}" == "ready" ]] || (echo "Failed to enable backup" && exit 1)
+      [[ "${status}" == "ready" ]] || (echo "Failed to configure the backup" && exit 1)
+      /root/installer/configureUiPathAS.sh snapshot backup enable
     fi
 
   else
@@ -186,13 +217,10 @@ function main() {
     sleep $((LOCATION_IN_ARRAY * 300))
 
     status="success"
-    /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k -j server --accept-license-agreement --skip-pre-reqs || status="failed"
+    /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k -j server --accept-license-agreement || status="failed"
     if [[ "${status}" == "failed" ]]; then
       echo "The RKE2 server failed to start"
       exit 1
-    fi
-    if ((SETUPBACKUP == 1)); then
-      /root/installer/install-uipath.sh -i /root/installer/backup.json -o /root/installer/output-backup.json -b -j server --accept-license-agreement
     fi
   fi
 
