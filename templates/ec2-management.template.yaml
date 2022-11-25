@@ -30,6 +30,13 @@ Parameters:
   InstanceIamRoleArn:
     Type: String
     Description: IAM Role ARN used by the EC2 instances
+  ExistingIamRole:
+    Type: String
+    Description: Chose true to use an existing IAM role
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
   AgentLaunchTemplateName:
     Type: String
     Default: ''
@@ -79,6 +86,9 @@ Conditions:
     - uipath-s3-quickstart
   IsMultiNode: !Not [ !Equals [ !Ref AgentAsgName, '' ] ]
   UseExternalOrch: !Equals [ !Ref UseExternalOrchestrator, 'true' ]
+  DeployIam: !Equals [!Ref ExistingIamRole, 'false']
+  DeployEventsBridgeRole: !And [!Condition IsMultiNode, !Condition DeployIam]
+  FindingAmiAtDeploy: !Not [ !Equals [!Ref InstanceAMIImageNameSSMParameter, ''] ]
 Resources:
 
   # CloudWatch log group for logging events from the SSM automation
@@ -125,6 +135,7 @@ Resources:
 
   AutomationAssumeRole:
     Type: AWS::IAM::Role
+    Condition: DeployIam
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -169,7 +180,10 @@ Resources:
                   - "ssm:GetParameter"
                 Resource: 
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${InstanceAMIIdSSMParameter}"
-                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${InstanceAMIImageNameSSMParameter}"
+                  - !If
+                    - FindingAmiAtDeploy
+                    - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${InstanceAMIImageNameSSMParameter}"
+                    - !Ref AWS::NoValue
                 Effect: Allow
           PolicyName: allow-parameter-store-update
         - PolicyDocument:
@@ -246,6 +260,7 @@ Resources:
 
   StateMachinesAssumeRole:
     Type: AWS::IAM::Role
+    Condition: DeployIam
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -261,7 +276,7 @@ Resources:
 
   EventsBridgeAssumeRole:
     Type: AWS::IAM::Role
-    Condition: IsMultiNode
+    Condition: DeployEventsBridgeRole
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -304,7 +319,7 @@ Resources:
       Content:
         description: UiPath Automation Suite - remove agent instance from cluster
         schemaVersion: '0.3'
-        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        assumeRole: !If [DeployIam, !GetAtt AutomationAssumeRole.Arn, !Ref InstanceIamRoleArn]
         parameters:
           InstanceId:
             type: String
@@ -355,7 +370,7 @@ Resources:
       Content:
         description: UiPath Automation Suite - remove agent instance from cluster
         schemaVersion: '0.3'
-        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        assumeRole: !If [DeployIam, !GetAtt AutomationAssumeRole.Arn, !Ref InstanceIamRoleArn]
         parameters:
           InstanceId:
             type: String
@@ -418,7 +433,7 @@ Resources:
               - UsingDefaultBucket
               - !Ref AWS::Region
               - !Ref QSS3BucketRegion
-      RoleArn: !GetAtt StateMachinesAssumeRole.Arn
+      RoleArn: !If [DeployIam, !GetAtt StateMachinesAssumeRole.Arn, !Ref InstanceIamRoleArn]
   
   RegisterAiCenter:
     Type: AWS::SSM::Document
@@ -429,7 +444,7 @@ Resources:
       Content:
         description: UiPath Automation Suite - register to Orchestrator
         schemaVersion: '0.3'
-        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        assumeRole: !If [DeployIam, !GetAtt AutomationAssumeRole.Arn, !Ref InstanceIamRoleArn]
         parameters:
           IdentityToken:
             type: String
@@ -471,7 +486,7 @@ Resources:
       Content:
         description: UiPath Automation Suite - create a snapshot of the Automation Suite cluster
         schemaVersion: '0.3'
-        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        assumeRole: !If [DeployIam, !GetAtt AutomationAssumeRole.Arn, !Ref InstanceIamRoleArn]
         mainSteps:
           - name: "getFirstInstance"
             action: "aws:executeAwsApi"
@@ -510,7 +525,7 @@ Resources:
       Content:
         description: UiPath Automation Suite - restores the Automation Suite cluster from a given snapshot
         schemaVersion: '0.3'
-        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        assumeRole: !If [DeployIam, !GetAtt AutomationAssumeRole.Arn, !Ref InstanceIamRoleArn]
         parameters:
           SnapshotName:
             type: String
@@ -627,7 +642,7 @@ Resources:
       Content:
         description: UiPath Automation Suite - get the list of avaliable snapshots of the Automation Suite cluster
         schemaVersion: '0.3'
-        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        assumeRole: !If [DeployIam, !GetAtt AutomationAssumeRole.Arn, !Ref InstanceIamRoleArn]
         mainSteps:
           - name: "getFirstInstance"
             action: "aws:executeAwsApi"
@@ -665,7 +680,7 @@ Resources:
       Content:
         description: UiPath Automation Suite - update AMI for the scalling groups
         schemaVersion: '0.3'
-        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        assumeRole: !If [DeployIam, !GetAtt AutomationAssumeRole.Arn, !Ref InstanceIamRoleArn]
         parameters:
           ImageName:
             type: String
@@ -813,7 +828,7 @@ Resources:
       Targets:
         - Arn: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AgentRemoveInstanceDocument}:$DEFAULT"
           Id: ASRobots-Termination
-          RoleArn: !GetAtt EventsBridgeAssumeRole.Arn
+          RoleArn: !If [DeployEventsBridgeRole, !GetAtt EventsBridgeAssumeRole.Arn, !Ref InstanceIamRoleArn]
           InputTransformer:
             InputPathsMap:
               instance_id: $.detail.EC2InstanceId
@@ -837,7 +852,7 @@ Resources:
       Targets:
         - Arn: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AgentRemoveInstanceDocument}:$DEFAULT"
           Id: AS-Agent-Termination
-          RoleArn: !GetAtt EventsBridgeAssumeRole.Arn
+          RoleArn: !If [DeployEventsBridgeRole, !GetAtt EventsBridgeAssumeRole.Arn, !Ref InstanceIamRoleArn]
           InputTransformer:
             InputPathsMap:
               instance_id: $.detail.EC2InstanceId
@@ -861,7 +876,7 @@ Resources:
       Targets:
         - Arn: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${ServerRemoveInstanceDocument}:$DEFAULT"
           Id: AS-Server-Termination
-          RoleArn: !GetAtt EventsBridgeAssumeRole.Arn
+          RoleArn: !If [DeployEventsBridgeRole, !GetAtt EventsBridgeAssumeRole.Arn, !Ref InstanceIamRoleArn]
           InputTransformer:
             InputPathsMap:
               instance_id: $.detail.EC2InstanceId

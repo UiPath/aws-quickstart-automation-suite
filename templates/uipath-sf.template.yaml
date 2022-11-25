@@ -520,6 +520,9 @@ Conditions:
   IsProductionPM: !And
   - !Equals [!Ref ProcessMining, "true"]
   - !Condition IsMultiNode
+  FindingAmiAtDeploy: !Equals
+    - !Ref AmiId
+    - ''
 Resources:
   FindAmiLambdaRole:
     Type: 'AWS::IAM::Role'
@@ -986,7 +989,7 @@ Resources:
             - !Ref 'AWS::Region'
             - !Ref QSS3BucketRegion
       Parameters:
-        InstanceAMIImageNameSSMParameter: !GetAtt ServerStack.Outputs.InstanceAMIImageNameSSMParameter
+        InstanceAMIImageNameSSMParameter: !If [FindingAmiAtDeploy, !GetAtt ServerStack.Outputs.InstanceAMIImageNameSSMParameter, '']
         InstanceAMIIdSSMParameter: !GetAtt ServerStack.Outputs.InstanceAMIIdSSMParameter
         AgentAsgName: !GetAtt ServerStack.Outputs.AgentAsgName
         ServerAsgName: !GetAtt ServerStack.Outputs.ServerAsgName
@@ -997,6 +1000,7 @@ Resources:
         AgentLaunchTemplateName: !GetAtt ServerStack.Outputs.AgentLaunchTemplateName
         ASRobotsLaunchTemplateName: !GetAtt ServerStack.Outputs.ASRobotsLaunchTemplateName
         InstanceIamRoleArn: !GetAtt ServerStack.Outputs.InstanceIamRoleArn
+        ExistingIamRole: !If [DeployIam, 'false', 'true']
         UseExternalOrchestrator: !Ref UseExternalOrchestrator
         QSS3BucketName: !Ref QSS3BucketName
         QSS3BucketRegion: !Ref QSS3BucketRegion
