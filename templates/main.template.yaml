@@ -59,14 +59,6 @@ Metadata:
           - OrchestratorCertificate
           - IdentityCertificate
       - Label:
-          default: Automation Suite external Orchestrator configuration
-        Parameters:
-          - UseExternalOrchestrator
-          - OrchestratorURL
-          - IdentityURL
-          - OrchestratorCertificate
-          - IdentityCertificate
-      - Label:
           default: DNS or SSL configuration
         Parameters:
           - UiPathFQDN
