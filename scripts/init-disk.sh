@@ -72,19 +72,19 @@ function main() {
         echo "SSD device name /dev/${crt_dev} found"
         case "${crt_dev}" in
           xvdb)
-          data_disk="/dev/xvdb"
+          data_disk="/dev/${crt_dev}"
           ;;
           xvdc)
-          etcd_disk="/dev/xvdc"
+          etcd_disk="/dev/${crt_dev}"
           ;;
           xvdd)
-          cluster_disk="/dev/xvdd"
+          cluster_disk="/dev/${crt_dev}"
           ;;
           xvde)
-          as_robots_caching_disk="/dev/xvde"
+          as_robots_caching_disk="/dev/${crt_dev}"
           ;;
           xvdf)
-          ceph_disk="/dev/xvde"
+          ceph_disk="/dev/${crt_dev}"
           ;;
         esac
       fi
