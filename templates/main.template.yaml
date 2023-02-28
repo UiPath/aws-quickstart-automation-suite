@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: >-
-  This template creates a Multi-AZ, multi-subnet VPC infrastructure with UIPath
-  Automation Suite deployed in private subnets, with a Load Balancer behind Route 53 in
+  This template creates a multi-Availability Zone, multi-subnet VPC infrastructure with UIPath
+  Automation Suite deployed in private subnets, with a load balancer behind Amazon Route 53 in
   public subnets. (qs-1r2g4122s)
 Metadata:
   QuickStartDocumentation:
@@ -28,6 +28,7 @@ Metadata:
         Parameters:
           - MultiNode
           - EnableBackup
+          - UseSharedBucket
           - UseLevel7LoadBalancer
           - UiPathVersion
           - InstallerDownloadUrl
@@ -66,13 +67,13 @@ Metadata:
           - AcmCertificateArn
           - UseInternalLoadBalancer
       - Label:
-          default: RDS configuration
+          default: Amazon RDS configuration
         Parameters:
           - RDSEngine
           - RDSVersion
           - DatabaseKmsKeyId
       - Label:
-          default: Quick Start S3 bucket configuration
+          default: Partner Solution S3 bucket configuration
         Parameters:
           - QSS3BucketName
           - QSS3KeyPrefix
@@ -83,23 +84,25 @@ Metadata:
       NumberOfAZs:
         default: Number of Availability Zones
       DeployBastion:
-        default: Deploy Bastion host
+        default: Deploy bastion host
       KeyPairName:
         default: Instance key pair
       AmiId:
-        default: Instance AMI id
+        default: Instance AMI ID
       GpuAmiId:
-        default: GPU instance AMI id
+        default: GPU instance AMI ID
       IamRoleArn:
-        default: IAM Role ARN
+        default: IAM role ARN
       IamRoleName:
-        default: IAM Role name
+        default: IAM role name
       MultiNode:
         default: Deployment type
       EnableBackup:
         default: Enable cluster backup
+      UseSharedBucket:
+        default: Use a shared bucket for external storage
       UseLevel7LoadBalancer:
-        default: Load Balancer
+        default: Load balancer
       UiPathVersion:
         default: Automation Suite version
       InstallerDownloadUrl:
@@ -107,7 +110,7 @@ Metadata:
       ExtraConfigKeys:
         default: Extra configuration keys
       SelfSignedCertificateValidity:
-        default: Validity of the self signed certificate
+        default: Validity of the self-signed certificate
       Orchestrator:
         default: Orchestrator
       ActionCenter:
@@ -145,31 +148,31 @@ Metadata:
       IdentityCertificate:
         default: Base64 encoded Identity certificate
       AddGpu:
-        default: Add GPU enabled VMs
+        default: Add GPU-enabled VMs
       UiPathFQDN:
         default: Hosting FQDN
       HostedZoneID:
-        default: ID of Route 53 hosted zone
+        default: ID of Route 53-hosted zone
       UseInternalLoadBalancer:
-        default: Use Internal Load Balancer
+        default: Use internal load balancer
       RDSEngine:
-        default: Engine of SQL Server deployed on RDS
+        default: Engine of SQL Server deployed on Amazon RDS
       RDSVersion:
-        default: Version of SQL Server deployed on RDS
+        default: Version of SQL Server deployed on Amazon RDS
       DatabaseKmsKeyId:
-        default: KMS Key Id used to encrypt RDS storage
+        default: AWS KMS key ID used to encrypt Amazon RDS storage
       AcmCertificateArn:
-        default: ARN of the ACM hosted certificate to use
+        default: ARN of the ACM-hosted certificate
       QSS3BucketName:
         default: Template-hosting S3 bucket
       QSS3KeyPrefix:
         default: Template folder
       QSS3BucketRegion:
-        default: Template-hosting S3 region
+        default: Template-hosting S3 Region
 Parameters:
   AvailabilityZones:
     Description: >-
-      Choose up to three Availability Zones to use for the VPC subnets.
+      Choose up to three Availability Zones for the VPC subnets.
     Type: "List<AWS::EC2::AvailabilityZone::Name>"
   NumberOfAZs:
     AllowedValues:
@@ -177,33 +180,32 @@ Parameters:
       - '3'
     Default: '2'
     Description: >-
-      Choose the number of Availability Zones to use in the VPC. This must match the number of AZs selected in the *Availability Zones* parameter.
+      Choose the number of Availability Zones to use in the VPC. This number must match the number of zones selected for the Availability Zones parameter.
     Type: String
   KeyPairName:
     Description: Existing key pair to connect to virtual machine (VM) instances.
     Type: 'AWS::EC2::KeyPair::KeyName'
   AmiId:
     Description: |
-      Enter the AMI Id to be used for the creation of the EC2 instances of the cluster.
-      Leave empty to determine automatically the AMI to use.
+      Provide the Amazon Machine Image (AMI) ID to create the EC2 instances of the cluster.
+      Leave empty to determine the AMI ID automatically during deployment.
     Type: String
     Default: ''
   GpuAmiId:
     Description: |
-      Enter the AMI Id to be used for the creation of the GPU enabled EC2 instance.
-      Leave empty to determine automatically the AMI to use.
+     Provide the AMI ID to create the GPU-enabled EC2 instance. Leave empty to determine the AMI ID automatically during deployment.
     Type: String
     Default: ''
   IamRoleArn:
-    Description: ARN of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Description: Amazon Resource Name (ARN) of a predeployed IAM role with sufficient permissions for the deployment. Leave empty to create a new role automatically during deployment.
     Type: String
     Default: ''
   IamRoleName:
-    Description: Name of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Description: Name of a predeployed IAM role with sufficient permissions for the deployment. Leave empty to create a new role automatically during deployment.
     Type: String
     Default: ''
   MultiNode:
-    Description: Install Automation Suite on a Single Node (recommended for evaluation/dev purposes) or Multi-node (recommended for production purposes)
+    Description: Install Automation Suite on a single node (recommended for evaluation/development purposes) or multinode (recommended for production purposes) environment.
     Type: String
     Default: 'Single Node'
     AllowedValues:
@@ -216,29 +218,36 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
+  UseSharedBucket:
+    Description: Enable shared bucket across products. Process Mining and Data Service will require a dedicated bucket each if enabled.
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
   UseLevel7LoadBalancer:
-    Description: Select either an Application Load Balancer (ALB) or a Network Load Balancer (NLB)
+    Description: Choose Application Load Balancer (ALB) or Network Load Balancer (NLB).
     Type: String
     Default: 'ALB'
     AllowedValues:
       - 'ALB'
       - 'NLB'
   UiPathVersion:
-    Description: UiPath version to install
+    Description: UiPath version to install.
     Type: String
-    Default: '2022.10.1'
+    Default: '2022.10.2'
     AllowedValues:
-      - '2022.10.1'
+      - '2022.10.2'
   InstallerDownloadUrl:
-    Description: Custom URL for installer download. Leave empty to use the UiPathVersion, provide an URL to override the version.
+    Description: Custom URL for the installer download. Leave empty to use the UiPath version.
     Type: String
     Default: ""
   ExtraConfigKeys:
-    Description: Extra configuration keys to add to the cluster config. Leave empty to use default config.
+    Description: Extra configuration keys to add to the cluster configuration. Leave empty to use the default configuration.
     Type: String
     Default: ""
   SelfSignedCertificateValidity:
-    Description: Validity of the self signed certificate in days, used by the deployment to encrypt traffic inside the VPC.
+    Description: Validity of the self-signed certificate in days, used by the deployment to encrypt traffic inside the VPC.
     Type: String
     Default: "1825"
     AllowedValues:
@@ -340,7 +349,7 @@ Parameters:
       - 'false'
   AddGpu:
     Description: >-
-      Choose true to add a GPU enabled VM to the deployment.
+      Choose true to add a GPU-enabled VM to the deployment.
     Type: String
     Default: 'false'
     AllowedValues:
@@ -375,25 +384,25 @@ Parameters:
     Type: String
     Default: ''
   HostedZoneID:
-    Description: ID of Route 53 hosted zone. Leave empty to pause the deployment once the load balancer was created and manually configure the DNS.
+    Description: ID of Route 53-hosted zone Leave empty to pause the deployment once the load balancer was created and manually configure the DNS.
     Type: String
     Default: ''
   UiPathFQDN:
     Description: >-
       Fully qualified domain name (FQDN) for Automation Suite.
-      This must be either a subdomain, or root domain, of the of ID of Route 53 hosted zone parameter.
+      Name must be either a subdomain or root domain of the ID of the Route 53-hosted zone parameter.
     Type: String
     AllowedPattern: '(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{0,62}[a-zA-Z0-9]\.)+[a-zA-Z]{2,63}$)'
     ConstraintDescription: >-
-      Fully qualified domain names can include numbers, lowercase letters, uppercase letters and hyphens (-).
+      FQDNs can include numbers, lowercase letters, uppercase letters, and hyphens (-).
   AcmCertificateArn:
     Description: |
-      ARN of certificate present in the ACM (Amazon Certificate Manager) to use with the ALB.
+      ARN of certificate in AWS Certificate Manager (ACM) to use with the ALB.
       Leave empty to create the public certificate during deployment.
     Type: String
     Default: ""
   UseInternalLoadBalancer:
-    Description: Deploy Internal Load Balancer
+    Description: Deploy internal load balancer.
     Type: String
     Default: "false"
     AllowedValues:
@@ -402,7 +411,7 @@ Parameters:
   DeployBastion:
     Description: |
       Deploy a bastion host inside the public subnet.
-      Choose false to skip deploying the Bastion.
+      Choose false to skip deploying the bastion host.
     Type: String
     Default: "true"
     AllowedValues:
@@ -410,7 +419,7 @@ Parameters:
       - 'false'
   RDSEngine:
     Type: String
-    Description: RDS MS SQL engine
+    Description: Amazon Relational Database Service (Amazon RDS) SQL engine.
     Default: "sqlserver-se"
     AllowedValues:
       - "sqlserver-ee"
@@ -418,7 +427,7 @@ Parameters:
       - "sqlserver-web"
   RDSVersion:
     Type: String
-    Description: RDS MS SQL version
+    Description: Amazon RDS SQL version.
     Default: "15.00"
     AllowedValues:
       - "15.00"
@@ -427,31 +436,41 @@ Parameters:
   DatabaseKmsKeyId:
     Type: String
     Default: ""
-    Description: KMS Key Id to use for the encryption of the RDS storage. Leave empty to not encrypt the RDS storage
+    Description: AWS Key Management Service (AWS KMS) key ID to use for encrypting the Amazon RDS storage. Leave empty to skip encrypting the Amazon RDS storage.
   QSS3BucketName:
     AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
     ConstraintDescription: >-
-      Quick Start bucket name can include numbers, lowercase letters, uppercase
-      letters, and hyphens (-). It cannot start or end with a hyphen (-).
-    Description: Name of the S3 bucket for your copy of the Quick Start assets. Do not modify.
+      The S3 bucket name can include numbers, lowercase letters,
+      and hyphens (-), but it cannot start or end with a hyphen.
+    Description: >-
+      Name of the S3 bucket for your copy of the deployment assets. Keep the default
+      name unless you are customizing the template. Changing the name updates code
+      references to point to a new location.
     Type: String
     Default: uipath-s3-quickstart
   QSS3BucketRegion:
     Default: us-east-1
     Description: >-
-      AWS Region where the Quick Start S3 bucket (QSS3BucketName) is hosted. Do not modify.
+      AWS Region where the S3 bucket (QSS3BucketName) is hosted. Keep
+      the default Region unless you are customizing the template. Changing the Region
+      updates code references to point to a new location. When using your own bucket,
+      specify the Region.
     Type: String
     AllowedPattern: (us(-gov)?|ap|ca|cn|eu|sa)-(central|(north|south)?(east|west)?)-\d
     ConstraintDescription: Must be a valid AWS Region code.
   QSS3KeyPrefix:
     AllowedPattern: '^[0-9a-zA-Z-/]*/$'
     ConstraintDescription: >-
-      The Quick Start S3 key prefix can include numbers, lowercase letters,
-      uppercase letters, hyphens (-), and forward slashes (/).
+      The S3 key prefix can include numbers, lowercase letters, uppercase letters,
+      hyphens (-), underscores (_), periods (.), asterisks (*), single quotes ('),
+      open parenthesis ((), close parenthesis ()), and forward slashes (/). End the
+      prefix with a forward slash.
     Default: aws-quickstart-sf/
     Description: >-
-      S3 key prefix that is used to simulate a directory for your copy of the
-      Quick Start assets. Do not modify.
+      S3 key prefix that is used to simulate a folder for your copy of the
+      deployment assets. Keep the default prefix unless you are customizing
+      the template. Changing the prefix updates code references to point to
+      a new location.
     Type: String
   AcceptLicenseAgreement:
     Description: >-
@@ -461,7 +480,7 @@ Parameters:
     Type: String
     AllowedPattern: ^true$
     ConstraintDescription: >-
-      In order to continue you must accept the License Agreement.
+      You must accept the License Agreement.
 Conditions:
   UsingDefaultBucket: !Equals
     - !Ref QSS3BucketName
@@ -521,6 +540,7 @@ Resources:
         NumberOfAZs: !Ref NumberOfAZs
         MultiNode: !Ref MultiNode
         EnableBackup: !Ref EnableBackup
+        UseSharedBucket: !Ref UseSharedBucket
         UseLevel7LoadBalancer: !Ref UseLevel7LoadBalancer
         PerformInstallation: "true"
         AddGpu: !Ref AddGpu
@@ -571,10 +591,10 @@ Outputs:
       It is a common organization-level resource from where everyone can access all of your Automation Suite areas: administration pages,
       platform-level pages, service-specific pages, and user-specific pages.
   AutomationSuiteUrl:
-    Description: Automation Suite Portal
+    Description: Automation Suite portal.
     Value: !Sub "https://${UiPathFQDN}"
   AutomationSuiteSecret:
-    Description: Credentials for Automation Suite Portal
+    Description: Credentials for Automation Suite portal.
     Value: !Join
       - ''
       - - !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/home?region=${AWS::Region}#!/secret?name="
@@ -585,7 +605,7 @@ Outputs:
       The settings that you configure from this portal are inherited by all your organizations, and some can be overwritten at the organization level.
     Value: !Sub "https://${UiPathFQDN}"
   HostAdministrationSecret:
-    Description: Credentials for Host Administration
+    Description: Credentials for Host Administration.
     Value: !Join
       - ''
       - - !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/home?region=${AWS::Region}#!/secret?name="
@@ -595,13 +615,13 @@ Outputs:
       You can use the ArgoCD console to manage installed products.
     Value: !Sub "https://alm.${UiPathFQDN}"
   ArgoCdSecret:
-    Description: Secret storing the ArgoCD admin credentials
+    Description: Secret storing the ArgoCD administrator credentials.
     Value: !Join
       - ''
       - - !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/home?region=${AWS::Region}#!/secret?name="
         - !GetAtt ServiceFabricStack.Outputs.ArgoCdSecret
   MonitoringFqdn:
-    Description: The Monitoring login page
+    Description:  The Monitoring login page.
     Value: !Sub "https://monitoring.${UiPathFQDN}"
   InputJsonSecret:
     Description: Secret storing the input.json content.
