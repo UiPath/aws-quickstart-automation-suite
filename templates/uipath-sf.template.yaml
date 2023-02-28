@@ -1,12 +1,10 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: >-
-  This template creates a Multi-AZ, multi-subnet VPC infrastructure with UIPath
-  Automation Suite deployed in private subnets, with a Load Balancer behind Route 53 in
-  public subnets. (qs-1r2g4122s)
+  This template deploys UiPath Automation Suite into an existing VPC. (qs-1r2g4122s)
 Metadata:
   UnusedParameter: !Ref AcceptLicenseAgreement
   QuickStartDocumentation:
-    EntrypointName: Launch into a new VPC
+    EntrypointName: Launch into an existing VPC
     Order: "1"
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -32,6 +30,7 @@ Metadata:
         Parameters:
           - MultiNode
           - EnableBackup
+          - UseSharedBucket
           - UseLevel7LoadBalancer
           - PerformInstallation
           - UiPathVersion
@@ -71,13 +70,13 @@ Metadata:
           - AcmCertificateArn
           - UseInternalLoadBalancer
       - Label:
-          default: RDS configuration
+          default: Amazon RDS configuration
         Parameters:
           - RDSEngine
           - RDSVersion
           - DatabaseKmsKeyId
       - Label:
-          default: Quick Start S3 bucket configuration
+          default: Partner Solution S3 bucket configuration
         Parameters:
           - QSS3BucketName
           - QSS3KeyPrefix
@@ -90,29 +89,31 @@ Metadata:
       NumberOfAZs:
         default: Number of Availability Zones
       PublicSubnetIDs:
-        default: Public Subnets IDs
+        default: Public subnet IDs
       PrivateSubnetIDs:
-        default: Private Subnets IDs
+        default: Private subnet IDs
       DeployBastion:
-        default: Deploy Bastion host
+        default: Deploy bastion host
       KeyPairName:
         default: Instance key pair
       AmiId:
-        default: Instance AMI id
+        default: Instance AMI ID
       GpuAmiId:
-        default: GPU instance AMI id
+        default: GPU instance AMI ID
       IamRoleArn:
-        default: IAM Role ARN
+        default: IAM role ARN
       IamRoleName:
-        default: IAM Role name
+        default: IAM role name
       MultiNode:
         default: Deployment type
       EnableBackup:
         default: Enable cluster backup
+      UseSharedBucket:
+        default: Use a shared bucket for external storage
       UseLevel7LoadBalancer:
-        default: Load Balancer
+        default: Load balancer
       PerformInstallation:
-        default: Perform Installation
+        default: Perform installation
       UiPathVersion:
         default: Automation Suite version
       InstallerDownloadUrl:
@@ -120,7 +121,7 @@ Metadata:
       ExtraConfigKeys:
         default: Extra configuration keys
       SelfSignedCertificateValidity:
-        default: Validity of the self signed certificate
+        default: Validity of the self-signed certificate
       Orchestrator:
         default: Orchsestrator
       ActionCenter:
@@ -158,27 +159,27 @@ Metadata:
       IdentityCertificate:
         default: Base64 encoded Identity certificate
       AddGpu:
-        default: Add GPU enabled VMs
+        default: Add GPU-enabled VMs
       UiPathFQDN:
         default: Hosting FQDN
       HostedZoneID:
-        default: ID of Route 53 hosted zone
+        default: ID of Amazon Route 53-hosted zone
       UseInternalLoadBalancer:
-        default: Use Internal Load Balancer
+        default: Use internal load balancer
       RDSEngine:
-        default: Engine of SQL Server deployed on RDS
+        default: Engine of SQL Server deployed on Amazon RDS
       RDSVersion:
-        default: Version of SQL Server deployed on RDS
+        default: Version of SQL Server deployed on Amazon RDS
       DatabaseKmsKeyId:
-        default: KMS Key Id used to encrypt RDS storage
+        default: AWS KMS key ID used to encrypt Amazon RDS storage
       AcmCertificateArn:
-        default: ARN of the ACM hosted certificate to use
+        default: ARN of the ACM-hosted certificate
       QSS3BucketName:
         default: Template-hosting S3 bucket
       QSS3KeyPrefix:
         default: Template folder
       QSS3BucketRegion:
-        default: Template-hosting S3 region
+        default: Template-hosting S3 Region
 Parameters:
   VPCCIDR:
     AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(\/([0-9]|[1-2][0-9]|3[0-2]))?$'
@@ -191,8 +192,8 @@ Parameters:
     Description: VPC ID
   PublicSubnetIDs:
     Description: |
-      List of public subnet IDs to deploy the internet-facing Load Balancer and the Bastion host.
-      Leave empty to deploy internal Load Balancer and skip the deployment of the Bastion host.
+      List of public subnet IDs to deploy the internet-facing load balancer and the bastion host.
+      Leave empty to deploy internal load balancer and skip deployment of the bastion host.
     Type: CommaDelimitedList
     Default: ''
   PrivateSubnetIDs:
@@ -204,25 +205,25 @@ Parameters:
       - '3'
     Default: '2'
     Description: >-
-      Choose the number of Availability Zones to use in the VPC. This must match the number of AZs selected in the *Availability Zones* parameter.
+      Choose the number of Availability Zones to use in the VPC. This number must match the number of zones selected in the Availability Zones parameter.
     Type: String
   KeyPairName:
     Description: Existing key pair to connect to virtual machine (VM) instances.
     Type: 'AWS::EC2::KeyPair::KeyName'
   AmiId:
     Description: |
-      Enter the AMI Id to be used for the creation of the EC2 instances of the cluster.
-      Leave empty to determine automatically the AMI to use.
+      The Amazon Machine Image (AMI) ID used to create the EC2 instances of the cluster.
+      Leave empty to determine the AMI ID automatically during deployment.
     Type: String
     Default: ''
   GpuAmiId:
     Description: |
-      Enter the AMI Id to be used for the creation of the GPU enabled EC2 instance.
-      Leave empty to determine automatically the AMI to use.
+      The AMI ID used to create the GPU-enabled EC2 instance.
+      Leave empty to determine the AMI ID automatically during deployment.
     Type: String
     Default: ''
   IamRoleArn:
-    Description: ARN of a pre-deployed IAM Role with sufficient permissions for the deployment. Leave empty to create the role
+    Description: Amazon Resource Name (ARN) of a predeployed IAM role with sufficient permissions for the deployment. Leave empty to create a new role automatically during deployment..
     Type: String
     Default: ''
   IamRoleName:
@@ -230,7 +231,7 @@ Parameters:
     Type: String
     Default: ''
   MultiNode:
-    Description: Install Automation Suite on a Single Node (recommended for evaluation/dev purposes) or Multi-node (recommended for production purposes)
+    Description: Install Automation Suite on a single node (recommended for evaluation/development purposes) or multinode (recommended for production purposes) environments.
     Type: String
     Default: 'Single Node'
     AllowedValues:
@@ -243,8 +244,15 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
+  UseSharedBucket:
+    Description: Enable shared bucket across products. Process Mining and Data Service will require a dedicated bucket each if enabled.
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
   UseLevel7LoadBalancer:
-    Description: Select either an Application Load Balancer (ALB) or a Network Load Balancer (NLB)
+    Description: Choose Application Load Balancer (ALB) or Network Load Balancer (NLB).
     Type: String
     Default: 'ALB'
     AllowedValues:
@@ -260,13 +268,13 @@ Parameters:
       - 'true'
       - 'false'
   UiPathVersion:
-    Description: UiPath version to install
+    Description: UiPath version to install.
     Type: String
-    Default: '2022.10.1'
+    Default: '2022.10.2'
     AllowedValues:
-      - '2022.10.1'
+      - '2022.10.2'
   InstallerDownloadUrl:
-    Description: Custom URL for installer download. Leave empty to use the UiPathVersion, provide an URL to override the version.
+    Description: Custom URL for installer download. Leave empty to use the UiPath version.
     Type: String
     Default: ""
   ExtraConfigKeys:
@@ -274,7 +282,7 @@ Parameters:
     Type: String
     Default: ""
   SelfSignedCertificateValidity:
-    Description: Validity of the self signed certificate in days, used by the deployment to encrypt traffic inside the VPC.
+    Description: Validity of the self-signed certificate in days, used by the deployment to encrypt traffic inside the VPC.
     Type: String
     Default: "1825"
     AllowedValues:
@@ -404,32 +412,32 @@ Parameters:
     Default: ''
   AddGpu:
     Description: >-
-      Choose true to add a GPU enabled VM to the deployment.
+      Choose true to add a GPU-enabled VM to the deployment.
     Type: String
     Default: 'false'
     AllowedValues:
       - 'true'
       - 'false'
   HostedZoneID:
-    Description: ID of Route 53 hosted zone. Leave empty to pause the deployment once the load balancer was created and manually configure the DNS.
+    Description: ID of Amazon Route 53-hosted zone. Leave empty to pause the deployment once the load balancer was created and manually configure the DNS.
     Type: String
     Default: ''
   UiPathFQDN:
     Description: >-
       Fully qualified domain name (FQDN) for Automation Suite.
-      This must be either a subdomain, or root domain, of the of ID of Route 53 hosted zone parameter.
+      Name must be either a subdomain or root domain of the of ID of Amazon Route 53-hosted zone parameter.
     Type: String
     AllowedPattern: '(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{0,62}[a-zA-Z0-9]\.)+[a-zA-Z]{2,63}$)'
     ConstraintDescription: >-
-      Fully qualified domain names can include numbers, lowercase letters, uppercase letters and hyphens (-).
+      FQDNs can include numbers, lowercase letters, uppercase letters, and hyphens (-).
   AcmCertificateArn:
     Description: |
-      ARN of certificate present in the ACM (Amazon Certificate Manager) to use with the ALB.
+      ARN of certificate present in AWS Certificate Manager (ACM) to use with the ALB.
       Leave empty to create the public certificate during deployment.
     Type: String
     Default: ""
   UseInternalLoadBalancer:
-    Description: Deploy Internal Load Balancer
+    Description: Deploy internal load balancer.
     Type: String
     Default: "false"
     AllowedValues:
@@ -438,7 +446,7 @@ Parameters:
   DeployBastion:
     Description: |
       Deploy a bastion host inside the public subnet.
-      Choose false to skip deploying the Bastion.
+      Choose false to skip deploying the bastion host.
     Type: String
     Default: "true"
     AllowedValues:
@@ -446,7 +454,7 @@ Parameters:
       - 'false'
   RDSEngine:
     Type: String
-    Description: RDS MS SQL engine
+    Description: Amazon RDS SQL Server engine.
     Default: "sqlserver-se"
     AllowedValues:
       - "sqlserver-ee"
@@ -454,7 +462,7 @@ Parameters:
       - "sqlserver-web"
   RDSVersion:
     Type: String
-    Description: RDS MS SQL version
+    Description: Amazon RDS SQL Server version.
     Default: "15.00"
     AllowedValues:
       - "15.00"
@@ -463,31 +471,41 @@ Parameters:
   DatabaseKmsKeyId:
     Type: String
     Default: ""
-    Description: KMS Key Id to use for the encryption of the RDS storage. Leave empty to not encrypt the RDS storage
+    Description: AWS Key Management Service (AWS KMS) key II to encrypt Amazon RDS storage. Leave empty to skip encrypting Amazon RDS storage.
   QSS3BucketName:
     AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
     ConstraintDescription: >-
-      Quick Start bucket name can include numbers, lowercase letters, uppercase
-      letters, and hyphens (-). It cannot start or end with a hyphen (-).
-    Description: Name of the S3 bucket for your copy of the Quick Start assets. Do not modify.
+      The S3 bucket name can include numbers, lowercase letters,
+      and hyphens (-), but it cannot start or end with a hyphen.
+    Description: >-
+      Name of the S3 bucket for your copy of the deployment assets. Keep the default
+      name unless you are customizing the template. Changing the name updates code
+      references to point to a new location.
     Type: String
     Default: uipath-s3-quickstart
   QSS3BucketRegion:
     Default: us-east-1
     Description: >-
-      AWS Region where the Quick Start S3 bucket (QSS3BucketName) is hosted. Do not modify.
+      AWS Region where the S3 bucket (QSS3BucketName) is hosted. Keep
+      the default Region unless you are customizing the template. Changing the Region
+      updates code references to point to a new location. When using your own bucket,
+      specify the Region.
     Type: String
     AllowedPattern: (us(-gov)?|ap|ca|cn|eu|sa)-(central|(north|south)?(east|west)?)-\d
     ConstraintDescription: Must be a valid AWS Region code.
   QSS3KeyPrefix:
     AllowedPattern: '^[0-9a-zA-Z-/]*/$'
     ConstraintDescription: >-
-      The Quick Start S3 key prefix can include numbers, lowercase letters,
-      uppercase letters, hyphens (-), and forward slashes (/).
+      The S3 key prefix can include numbers, lowercase letters, uppercase letters,
+      hyphens (-), underscores (_), periods (.), asterisks (*), single quotes ('),
+      open parenthesis ((), close parenthesis ()), and forward slashes (/). End the
+      prefix with a forward slash.
     Default: aws-quickstart-sf/
     Description: >-
-      S3 key prefix that is used to simulate a directory for your copy of the
-      Quick Start assets. Do not modify.
+      S3 key prefix that is used to simulate a folder for your copy of the
+      deployment assets. Keep the default prefix unless you are customizing
+      the template. Changing the prefix updates code references to point to
+      a new location.
     Type: String
   AcceptLicenseAgreement:
     Description: >-
@@ -497,7 +515,7 @@ Parameters:
     Type: String
     AllowedPattern: ^true$
     ConstraintDescription: >-
-      In order to continue you must accept the License Agreement.
+      You must accept the license agreement.
 Conditions:
   UsingDefaultBucket: !Equals
     - !Ref QSS3BucketName
@@ -523,13 +541,35 @@ Conditions:
   FindingAmiAtDeploy: !Equals
     - !Ref AmiId
     - ''
+  UsingSharedBucket: !Equals [!Ref UseSharedBucket, "true"]
+  NotUsingSharedBucket: !Not [!Condition UsingSharedBucket]
+  DeployDataServiceStorageBucket: !Equals [!Ref DataService, "true"]
+  DeployProcessMiningStorageBucket: !Equals [!Ref ProcessMining, "true"]
+  DeployOrchestratorStorageBucket: !And
+    - !Equals [!Ref Orchestrator, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployAppsStorageBucket: !And
+    - !Equals [!Ref BusinessApps, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployTestManagerStorageBucket: !And
+    - !Equals [!Ref TestManager, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployAiCenterStorageBucket: !And
+    - !Equals [!Ref AiCenter, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployDocumentUnderstandingStorageBucket: !And
+    - !Equals [!Ref DocumentUnderstanding, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployTaskMiningStorageBucket: !And
+    - !Equals [!Ref TaskMining, "true"]
+    - !Condition NotUsingSharedBucket
 Resources:
   FindAmiLambdaRole:
     Type: 'AWS::IAM::Role'
     Condition: DeployIam
     Properties:
       Description: >-
-        IAM Role to be assumed by Lambda functions which find AMI ids
+        IAM role to be assumed by Lambda functions that find AMI IDs.
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -562,7 +602,7 @@ Resources:
   FindAMIFunction:
     Type: 'AWS::Lambda::Function'
     Properties:
-      Description: Finds a matching AMI Id
+      Description: Finds a matching AMI ID.
       Handler: lambda_function.handler
       Role: !If [DeployIam, !GetAtt FindAmiLambdaRole.Arn, !Ref IamRoleArn]
       Code:
@@ -650,6 +690,33 @@ Resources:
         QSS3BucketRegion: !Ref QSS3BucketRegion
         QSS3KeyPrefix: !Ref QSS3KeyPrefix
 
+  ExternalStorageStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub
+        - >-
+          https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/external-storage.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub '${QSS3BucketName}-${AWS::Region}'
+            - !Ref QSS3BucketName
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref QSS3BucketRegion
+      Parameters:
+        UseSharedBucket: !Ref UseSharedBucket
+        Orchestrator: !Ref Orchestrator
+        Apps: !Ref BusinessApps
+        TestManager: !Ref TestManager
+        DataService: !Ref DataService
+        AiCenter: !Ref AiCenter
+        DocumentUnderstanding: !Ref DocumentUnderstanding
+        TaskMining: !Ref TaskMining
+        ProcessMining: !Ref ProcessMining
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+
   ServerStack:
     Type: 'AWS::CloudFormation::Stack'
     DependsOn: CreateInputJson
@@ -708,6 +775,17 @@ Resources:
         AddGpu: !Ref AddGpu
         DeployBastion: !Ref DeployBastion
         InstallerDownloadUrlParameterName: !Ref InstallerDownloadUrlSSMParameter
+        SharedStorageBucket: !If [UsingSharedBucket, !GetAtt ExternalStorageStack.Outputs.SharedStorageBucket, '']
+        PlatformStorageBucket: !If [NotUsingSharedBucket, !GetAtt ExternalStorageStack.Outputs.PlatformStorageBucket, '']
+        OrchestratorStorageBucket: !If [DeployOrchestratorStorageBucket, !GetAtt ExternalStorageStack.Outputs.OrchestratorStorageBucket, '']
+        AppsStorageBucket: !If [DeployAppsStorageBucket, !GetAtt ExternalStorageStack.Outputs.AppsStorageBucket, '']
+        TestManagerStorageBucket: !If [DeployTestManagerStorageBucket, !GetAtt ExternalStorageStack.Outputs.TestManagerStorageBucket, '']
+        DataServiceStorageBucket: !If [DeployDataServiceStorageBucket, !GetAtt ExternalStorageStack.Outputs.DataServiceStorageBucket, '']
+        AiCenterStorageBucket: !If [DeployAiCenterStorageBucket, !GetAtt ExternalStorageStack.Outputs.AiCenterStorageBucket, '']
+        DocumentUnderstandingStorageBucket: !If [DeployDocumentUnderstandingStorageBucket, !GetAtt ExternalStorageStack.Outputs.DocumentUnderstandingStorageBucket, '']
+        TaskMiningStorageBucket: !If [DeployTaskMiningStorageBucket, !GetAtt ExternalStorageStack.Outputs.TaskMiningStorageBucket, '']
+        ProcessMiningStorageBucket: !If [DeployProcessMiningStorageBucket, !GetAtt ExternalStorageStack.Outputs.ProcessMiningStorageBucket, '']
+
 
   ConfigureSSLStack:
     Type: AWS::CloudFormation::Stack
@@ -845,6 +923,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt CreateInputJsonFunction.Arn
       RegionName: !Ref 'AWS::Region'
+      AwsUrlSuffix: !Ref 'AWS::URLSuffix'
       TargetSecretArn: !Ref InputJsonSecret
       RDSPasswordSecretArn: !Ref RDSPassword
       PlatformSecretArn: !Ref PlatformSecret
@@ -886,6 +965,16 @@ Resources:
       PrivateSubnetIDs: !Join [",", !Ref PrivateSubnetIDs]
       ExtraConfigKeys: !Ref ExtraConfigKeys
       SelfSignedCertificateValidity: !Ref SelfSignedCertificateValidity
+      SharedStorageBucket: !If [UsingSharedBucket, !GetAtt ExternalStorageStack.Outputs.SharedStorageBucket, '']
+      PlatformStorageBucket: !If [NotUsingSharedBucket, !GetAtt ExternalStorageStack.Outputs.PlatformStorageBucket, '']
+      OrchestratorStorageBucket: !If [DeployOrchestratorStorageBucket, !GetAtt ExternalStorageStack.Outputs.OrchestratorStorageBucket, '']
+      AppsStorageBucket: !If [DeployAppsStorageBucket, !GetAtt ExternalStorageStack.Outputs.AppsStorageBucket, '']
+      TestManagerStorageBucket: !If [DeployTestManagerStorageBucket, !GetAtt ExternalStorageStack.Outputs.TestManagerStorageBucket, '']
+      DataServiceStorageBucket: !If [DeployDataServiceStorageBucket, !GetAtt ExternalStorageStack.Outputs.DataServiceStorageBucket, '']
+      AiCenterStorageBucket: !If [DeployAiCenterStorageBucket, !GetAtt ExternalStorageStack.Outputs.AiCenterStorageBucket, '']
+      DocumentUnderstandingStorageBucket: !If [DeployDocumentUnderstandingStorageBucket, !GetAtt ExternalStorageStack.Outputs.DocumentUnderstandingStorageBucket, '']
+      TaskMiningStorageBucket: !If [DeployTaskMiningStorageBucket, !GetAtt ExternalStorageStack.Outputs.TaskMiningStorageBucket, '']
+      ProcessMiningStorageBucket: !If [DeployProcessMiningStorageBucket, !GetAtt ExternalStorageStack.Outputs.ProcessMiningStorageBucket, '']
 
   ComputeResourceSizeLambdaRole:
     Type: 'AWS::IAM::Role'
@@ -1012,8 +1101,8 @@ Outputs:
     Description: UiPath Service Fabric login page.
     Value: !Sub "https://${UiPathFQDN}"
   Postdeployment:
-    Description: See the deployment guide for post-deployment steps.
-    Value: https://aws.amazon.com/quickstart/?quickstart-all.sort-by=item.additionalFields.sortDate&quickstart-all.sort-order=desc&awsm.page-quickstart-all=5
+    Description: See the documentation for post-deployment steps.
+    Value: https://docs.uipath.com/automation-suite/docs/aws-post-deployment-steps
   InputJsonSecret:
     Description: Secret storing the input.json content.
     Value: !Ref InputJsonSecret
@@ -1021,13 +1110,13 @@ Outputs:
     Description: Secret storing the platform host tenant credentials.
     Value: !Ref PlatformSecret
   ArgoCdSecret:
-    Description: Secret storing the ArgoCD admin credentials.
+    Description: Secret storing the ArgoCD administrator credentials.
     Value: !Ref ArgoCdSecret
   ArgoCdUserSecret:
-    Description: Secret storing the ArgoCD readonly user credentials.
+    Description: Secret storing the ArgoCD read-only user credentials.
     Value: !Ref ArgoCdUserSecret
   OrgSecret:
-    Description: Secret storing the org admin credentials.
+    Description: Secret storing the organization administrator credentials.
     Value: !Ref OrgSecret
   ClusterAdministrationURL:
     Description: The Unified UI for Cluster management page.

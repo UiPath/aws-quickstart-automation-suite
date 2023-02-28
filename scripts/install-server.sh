@@ -95,6 +95,11 @@ function update_efs_permissions() {
   rm -rf "${local_path}"
 }
 
+function patch_istio() {
+    kubectl patch gateway main-gateway -p='[{"op":"add", "path":"/spec/servers/0/hosts/-", "value":"*"}]' -n istio-system --type=json
+    kubectl -n istio-system delete pod --all
+}
+
 function main() {
   NODE_TYPE="FIRST_SERVER"
   local registration_url
@@ -124,8 +129,6 @@ function main() {
 
     [[ "${status}" == "ready" ]] || (echo "Failed to install infra" && exit 1)
 
-    kubectl patch gateway main-gateway -p='[{"op":"add", "path":"/spec/servers/0/hosts/-", "value":"*"}]' -n istio-system --type=json
-    kubectl -n istio-system delete pod --all
     /root/upload-kubeconfig.sh
 
     echo "waiting for the other nodes"
@@ -143,6 +146,9 @@ function main() {
     done
 
     ((no_of_nodes_actual >= no_of_nodes_required)) || (echo "Required number of nodes failed to start" && exit 1)
+
+    # Patch istio to allow argo access through ALB even if installer fails
+    trap patch_istio EXIT
 
     try=0
     maxtry=2
@@ -180,7 +186,7 @@ function main() {
       status="notready"
       while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
         echo "Trying to configure backup ==== ${try}/${maxtry}"
-        update_efs_permissions "$backup_endpoint"
+        update_efs_permissions "$backup_endpoint" || true
         /root/installer/configureUiPathAS.sh snapshot config --target "$backup_target" \
                                                             --endpoint "$backup_endpoint" \
                                                             --location "$backup_location" \
@@ -209,6 +215,16 @@ function main() {
 
     [[ "${registration_status}" == "200" ]] || (echo "Primary server failed to start" && exit 1)
 
+    try=0
+    registration_status=$(curl -w '%{response_code}' -sk -o /dev/null https://"${registration_url}":6443)  || true
+    while [[ "${registration_status}" != "401" ]] && ((try != maxtry)); do
+      try=$((try + 1))
+      registration_status=$(curl -w '%{response_code}' -sk -o /dev/null https://"${registration_url}":6443)  || true
+      echo "Trying kubeapi port for ${registration_url} ==== ${try}/${maxtry}" && sleep 30
+    done
+
+    [[ "${registration_status}" == "401" ]] || (echo "Primary server failed to start (kubeapi)" && exit 1)
+
     echo "Primary server is up. Position in array of current server is: ${LOCATION_IN_ARRAY}"
     # waiting for Longhorn and Istio to install on primary server
     echo "sleeping 7 minutes"
@@ -216,12 +232,15 @@ function main() {
     # introducing 5 minutes between servers, to avoid the etcd too many learners race condition
     sleep $((LOCATION_IN_ARRAY * 300))
 
-    status="success"
-    /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k -j server --accept-license-agreement || status="failed"
-    if [[ "${status}" == "failed" ]]; then
-      echo "The RKE2 server failed to start"
-      exit 1
-    fi
+    try=0
+    maxtry=2
+    status="notready"
+    while [[ "${status}" != "ready" ]] && ((try != maxtry)); do
+      echo "Trying to install the services ==== ${try}/${maxtry}"
+      try=$((try + 1))
+      /root/installer/install-uipath.sh -i /root/installer/input.json -o /root/installer/output.json -k -j server --accept-license-agreement --skip-compare-config && status="ready"
+    done
+    [[ "${status}" == "ready" ]] || (echo "Failed to install infra" && exit 1)
   fi
 
   try=0

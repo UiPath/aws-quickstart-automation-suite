@@ -51,6 +51,7 @@ def check_ai_center_external_certificates(properties: dict):
 
 def create(properties, physical_id):
     region = properties["RegionName"]
+    aws_url_suffix = properties["AwsUrlSuffix"]
     secret_arn = properties["TargetSecretArn"]
     db_password_secret_arn = properties["RDSPasswordSecretArn"]
     platform_secret_arn = properties['PlatformSecretArn']
@@ -68,6 +69,17 @@ def create(properties, physical_id):
     private_subnet_ids = properties['PrivateSubnetIDs']
     extra_dict_keys = properties['ExtraConfigKeys']
     self_signed_cert_validity = properties['SelfSignedCertificateValidity']
+    shared_bucket = properties['SharedStorageBucket']
+    using_shared_bucket = (shared_bucket != '')
+    platform_bucket = shared_bucket if using_shared_bucket else properties['PlatformStorageBucket']
+    orchestrator_bucket = shared_bucket if using_shared_bucket else properties['OrchestratorStorageBucket']
+    apps_bucket = shared_bucket if using_shared_bucket else properties['AppsStorageBucket']
+    test_manager_bucket = shared_bucket if using_shared_bucket else properties['TestManagerStorageBucket']
+    ai_center_bucket = shared_bucket if using_shared_bucket else properties['AiCenterStorageBucket']
+    du_bucket = shared_bucket if using_shared_bucket else properties['DocumentUnderstandingStorageBucket']
+    task_mining_bucket = shared_bucket if using_shared_bucket else properties['TaskMiningStorageBucket']
+    data_service_bucket = properties['DataServiceStorageBucket']
+    process_mining_bucket = properties['ProcessMiningStorageBucket']
     use_external_orchestrator = properties['UseExternalOrchestrator']
     orchestrator_url = properties['OrchestratorURL']
     identity_url = properties['IdentityURL']
@@ -82,7 +94,13 @@ def create(properties, physical_id):
     ret['cloud_template_source'] = 'Quickstart'
 
     ret['external_object_storage'] = {
-        'enabled': False,
+        'enabled': True,
+        'create_bucket': False,
+        'storage_type': 's3',
+        'region': region,
+        'use_instance_profile': True,
+        'port': 443,
+        'fqdn': f's3.{region}.{aws_url_suffix}'
     }
 
     ret['fixed_rke_address'] = internal_load_balancer_dns
@@ -139,8 +157,8 @@ def create(properties, physical_id):
     ret["server_certificate"]["tls_key_file"] = "/root/server.key"
 
     ret["identity_certificate"] = {}
-    ret["identity_certificate"]["token_signing_cert_file"] = "/root/token_signing_certificate.pfx"
-    ret["identity_certificate"]["token_signing_cert_pass"] = ''.join(random.choice(string.ascii_letters) for i in range(20))
+    ret["identity_certificate"]["token_signing_cert_file"] = "/root/token_signing_certificate.pfx"  # nosec
+    ret["identity_certificate"]["token_signing_cert_pass"] = ''.join(random.choice(string.ascii_letters) for i in range(20))  # nosec
     ret["identity_certificate"]["ldap_cert_authority_file"] = ""
 
     ret['self_signed_cert_validity'] = self_signed_cert_validity
@@ -177,11 +195,19 @@ def create(properties, physical_id):
 
     ret['platform'] = {}
     ret['platform']['enabled'] = enabled_services_map['platform']
+    ret['platform']['external_object_storage'] = {'bucket_name': platform_bucket}
+    ret['infra'] = {
+        "external_object_storage": {
+            "bucket_name": platform_bucket
+        }
+    }
 
     ret['orchestrator'] = {}
     ret['orchestrator']['enabled'] = enabled_services_map['orchestrator']
     ret['orchestrator']['testautomation'] = {"enabled": enabled_services_map['orchestrator']}
     ret['orchestrator']['updateserver'] = {"enabled": enabled_services_map['orchestrator']}
+    if enabled_services_map['orchestrator']:
+        ret['orchestrator']['external_object_storage'] = {'bucket_name': orchestrator_bucket}
 
     ret['automation_hub'] = {"enabled": enabled_services_map['automation_hub']}
 
@@ -190,19 +216,27 @@ def create(properties, physical_id):
     ret['action_center'] =  {"enabled":enabled_services_map['action_center']}
 
     ret['dataservice'] = {"enabled": enabled_services_map['dataservice']}
+    if enabled_services_map['dataservice']:
+        ret['dataservice']['external_object_storage'] = {'bucket_name': data_service_bucket}
 
     ret['test_manager'] = {"enabled": enabled_services_map['test_manager']}
+    if enabled_services_map['test_manager']:
+        ret['test_manager']['external_object_storage'] = {'bucket_name': test_manager_bucket}
 
     ret['insights'] = {"enabled": enabled_services_map['test_manager']}
 
     ret['apps'] = {"enabled": enabled_services_map['apps']}
+    if enabled_services_map['apps']:
+        ret['apps']['external_object_storage'] = {'bucket_name': apps_bucket}
 
     ret['task_mining'] = {"enabled": enabled_services_map['task_mining']}
     if enabled_services_map['task_mining']:
+        ret['task_mining']['external_object_storage'] = {'bucket_name': task_mining_bucket}
         initial_number_of_instances += 1
 
     ret['processmining'] = {"enabled": enabled_services_map['processmining']}
     if enabled_services_map['processmining']:
+        ret['processmining']['external_object_storage'] = {'bucket_name': process_mining_bucket}
         if pm_db_endpoint:
             ret['processmining']["warehouse"] = {
                 "sql_connection_str": f"Server=tcp:{pm_db_endpoint},1433;Initial Catalog=DB_NAME_PLACEHOLDER;Persist Security Info=False;User Id={secret['username']};Password='{dot_net_escaped_password}';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30;Max Pool Size=100;",
@@ -211,6 +245,7 @@ def create(properties, physical_id):
 
     ret['aicenter'] = {"enabled": enabled_services_map['aicenter']}
     if enabled_services_map['aicenter']:
+        ret['aicenter']['external_object_storage'] = {'bucket_name': ai_center_bucket}
         if use_external_orchestrator.lower() == "true":
             ret['aicenter']["orchestrator_url"] = orchestrator_url
             ret['aicenter']["identity_server_url"] = identity_url
@@ -225,6 +260,7 @@ def create(properties, physical_id):
             "enabled": True,
             "max_cpu_per_pod": 2
         }
+        ret['documentunderstanding']['external_object_storage'] = {'bucket_name': du_bucket}
 
     ret['asrobots'] = {'enabled': enabled_services_map['asrobots']}
     if enabled_services_map['asrobots']:
@@ -245,6 +281,7 @@ def create(properties, physical_id):
 
 def update(properties, physical_id):
     region = properties["RegionName"]
+    aws_url_suffix = properties["AwsUrlSuffix"]
     secret_arn = properties["TargetSecretArn"]
     db_password_secret_arn = properties["RDSPasswordSecretArn"]
     platform_secret_arn = properties['PlatformSecretArn']
@@ -262,6 +299,17 @@ def update(properties, physical_id):
     private_subnet_ids = properties['PrivateSubnetIDs']
     extra_dict_keys = properties['ExtraConfigKeys']
     self_signed_cert_validity = properties['SelfSignedCertificateValidity']
+    shared_bucket = properties['SharedStorageBucket']
+    using_shared_bucket = (shared_bucket != '')
+    platform_bucket = shared_bucket if using_shared_bucket else properties['PlatformStorageBucket']
+    orchestrator_bucket = shared_bucket if using_shared_bucket else properties['OrchestratorStorageBucket']
+    apps_bucket = shared_bucket if using_shared_bucket else properties['AppsStorageBucket']
+    test_manager_bucket = shared_bucket if using_shared_bucket else properties['TestManagerStorageBucket']
+    ai_center_bucket = shared_bucket if using_shared_bucket else properties['AiCenterStorageBucket']
+    du_bucket = shared_bucket if using_shared_bucket else properties['DocumentUnderstandingStorageBucket']
+    task_mining_bucket = shared_bucket if using_shared_bucket else properties['TaskMiningStorageBucket']
+    data_service_bucket = properties['DataServiceStorageBucket']
+    process_mining_bucket = properties['ProcessMiningStorageBucket']
     use_external_orchestrator = properties['UseExternalOrchestrator']
     orchestrator_url = properties['OrchestratorURL']
     identity_url = properties['IdentityURL']
@@ -276,7 +324,13 @@ def update(properties, physical_id):
     ret['cloud_template_source'] = 'Quickstart'
 
     ret['external_object_storage'] = {
-        'enabled': False,
+        'enabled': True,
+        'create_bucket': False,
+        'storage_type': 's3',
+        'region': region,
+        'use_instance_profile': True,
+        'port': 443,
+        'fqdn': f's3.{region}.{aws_url_suffix}'
     }
     
     ret['fixed_rke_address'] = internal_load_balancer_dns
@@ -333,8 +387,8 @@ def update(properties, physical_id):
     ret["server_certificate"]["tls_key_file"] = "/root/server.key"
 
     ret["identity_certificate"] = {}
-    ret["identity_certificate"]["token_signing_cert_file"] = "/root/token_signing_certificate.pfx"
-    ret["identity_certificate"]["token_signing_cert_pass"] = ''.join(random.choice(string.ascii_letters) for i in range(20))
+    ret["identity_certificate"]["token_signing_cert_file"] = "/root/token_signing_certificate.pfx"  # nosec
+    ret["identity_certificate"]["token_signing_cert_pass"] = ''.join(random.choice(string.ascii_letters) for i in range(20))  # nosec
     ret["identity_certificate"]["ldap_cert_authority_file"] = ""
 
     ret['self_signed_cert_validity'] = self_signed_cert_validity
@@ -371,11 +425,19 @@ def update(properties, physical_id):
 
     ret['platform'] = {}
     ret['platform']['enabled'] = enabled_services_map['platform']
+    ret['platform']['external_object_storage'] = {'bucket_name': platform_bucket}
+    ret['infra'] = {
+        "external_object_storage": {
+            "bucket_name": platform_bucket
+        }
+    }
 
     ret['orchestrator'] = {}
     ret['orchestrator']['enabled'] = enabled_services_map['orchestrator']
     ret['orchestrator']['testautomation'] = {"enabled": enabled_services_map['orchestrator']}
     ret['orchestrator']['updateserver'] = {"enabled": enabled_services_map['orchestrator']}
+    if enabled_services_map['orchestrator']:
+        ret['orchestrator']['external_object_storage'] = {'bucket_name': orchestrator_bucket}
 
     ret['automation_hub'] = {"enabled": enabled_services_map['automation_hub']}
 
@@ -384,21 +446,36 @@ def update(properties, physical_id):
     ret['action_center'] =  {"enabled":enabled_services_map['action_center']}
 
     ret['dataservice'] = {"enabled": enabled_services_map['dataservice']}
+    if enabled_services_map['dataservice']:
+        ret['dataservice']['external_object_storage'] = {'bucket_name': data_service_bucket}
 
     ret['test_manager'] = {"enabled": enabled_services_map['test_manager']}
+    if enabled_services_map['test_manager']:
+        ret['test_manager']['external_object_storage'] = {'bucket_name': test_manager_bucket}
 
     ret['insights'] = {"enabled": enabled_services_map['test_manager']}
 
     ret['apps'] = {"enabled": enabled_services_map['apps']}
+    if enabled_services_map['apps']:
+        ret['apps']['external_object_storage'] = {'bucket_name': apps_bucket}
 
     ret['task_mining'] = {"enabled": enabled_services_map['task_mining']}
     if enabled_services_map['task_mining']:
+        ret['task_mining']['external_object_storage'] = {'bucket_name': task_mining_bucket}
         initial_number_of_instances += 1
 
     ret['processmining'] = {"enabled": enabled_services_map['processmining']}
+    if enabled_services_map['processmining']:
+        ret['processmining']['external_object_storage'] = {'bucket_name': process_mining_bucket}
+        if pm_db_endpoint:
+            ret['processmining']["warehouse"] = {
+                "sql_connection_str": f"Server=tcp:{pm_db_endpoint},1433;Initial Catalog=DB_NAME_PLACEHOLDER;Persist Security Info=False;User Id={secret['username']};Password='{dot_net_escaped_password}';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30;Max Pool Size=100;",
+                "sqlalchemy_pyodbc_sql_connection_str": f"mssql+pyodbc://{urlencoded_pyodbc_username}:{urlencoded_pyodbc_password}@{pm_db_endpoint}:1433/DB_NAME_PLACEHOLDER?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=YES&Encrypt=YES"
+            }
 
     ret['aicenter'] = {"enabled": enabled_services_map['aicenter']}
     if enabled_services_map['aicenter']:
+        ret['aicenter']['external_object_storage'] = {'bucket_name': ai_center_bucket}
         if use_external_orchestrator.lower() == "true":
             ret['aicenter']["orchestrator_url"] = orchestrator_url
             ret['aicenter']["identity_server_url"] = identity_url
@@ -413,14 +490,7 @@ def update(properties, physical_id):
             "enabled": True,
             "max_cpu_per_pod": 2
         }
-    
-    ret['processmining'] = {"enabled": enabled_services_map['processmining']}
-    if enabled_services_map['processmining']:
-        if pm_db_endpoint:
-            ret['processmining']["warehouse"] = {
-                "sql_connection_str": f"Server=tcp:{pm_db_endpoint},1433;Initial Catalog=DB_NAME_PLACEHOLDER;Persist Security Info=False;User Id={secret['username']};Password='{dot_net_escaped_password}';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30;Max Pool Size=100;",
-                "sqlalchemy_pyodbc_sql_connection_str": f"mssql+pyodbc://{urlencoded_pyodbc_username}:{urlencoded_pyodbc_password}@{pm_db_endpoint}:1433/DB_NAME_PLACEHOLDER?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=YES&Encrypt=YES"
-            }
+        ret['documentunderstanding']['external_object_storage'] = {'bucket_name': du_bucket}
 
     ret['asrobots'] = {'enabled': enabled_services_map['asrobots']}
     if enabled_services_map['asrobots']:

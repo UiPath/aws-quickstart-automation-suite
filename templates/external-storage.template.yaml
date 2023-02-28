@@ -1,0 +1,377 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates a the storage stack of the deployment (qs-1r2g4122s)
+Parameters:
+  UseSharedBucket:
+    Type: String
+    AllowedValues:
+      - "false"
+      - "true"
+    Default: "false"
+    Description: Use a shared bucket for the services that support it.
+  Orchestrator:
+    Description: Choose false to disable Orchestrator bucket deployment.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  Apps:
+    Description: Choose false to disable Apps bucket deployment.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  TestManager:
+    Description: Choose false to disable Test Manager bucket deployment.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DataService:
+    Description: Choose false to disable Data Service bucket deployment.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AiCenter:
+    Description: Choose false to disable Ai Center bucket deployment.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DocumentUnderstanding:
+    Description: Choose false to disable Document Understanding bucket deployment.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  TaskMining:
+    Description: Choose false to disable Task Mining bucket deployment.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  ProcessMining:
+    Description: Choose false to disable Process Mining bucket deployment.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  QSS3BucketName:
+    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+    ConstraintDescription: >-
+      Quick Start bucket name can include numbers, lowercase letters, uppercase
+      letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Description: Name of the S3 bucket for your copy of the Quick Start assets. Do not modify.
+    Type: String
+    Default: uipath-s3-quickstart
+  QSS3KeyPrefix:
+    AllowedPattern: '^[0-9a-zA-Z-/]*/$'
+    ConstraintDescription: >-
+      The Quick Start S3 key prefix can include numbers, lowercase letters,
+      uppercase letters, hyphens (-), and forward slashes (/).
+    Default: aws-quickstart-sf/
+    Description: >-
+      S3 key prefix that is used to simulate a directory for your copy of the
+      Quick Start assets. Do not modify.
+    Type: String
+Conditions:
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, uipath-s3-quickstart]
+  UsingSharedBucket: !Equals [!Ref UseSharedBucket, "true"]
+  NotUsingSharedBucket: !Not [!Condition UsingSharedBucket]
+  DeployDataServiceStorageBucket: !Equals [!Ref DataService, "true"]
+  DeployProcessMiningStorageBucket: !Equals [!Ref ProcessMining, "true"]
+  DeployOrchestratorStorageBucket: !And
+    - !Equals [!Ref Orchestrator, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployAppsStorageBucket: !And
+    - !Equals [!Ref Apps, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployTestManagerStorageBucket: !And
+    - !Equals [!Ref TestManager, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployAiCenterStorageBucket: !And
+    - !Equals [!Ref AiCenter, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployDocumentUnderstandingStorageBucket: !And
+    - !Equals [!Ref DocumentUnderstanding, "true"]
+    - !Condition NotUsingSharedBucket
+  DeployTaskMiningStorageBucket: !And
+    - !Equals [!Ref TaskMining, "true"]
+    - !Condition NotUsingSharedBucket
+Resources:
+  SharedStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: UsingSharedBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  PlatformStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: NotUsingSharedBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  OrchestratorStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: DeployOrchestratorStorageBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  AppsStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: DeployAppsStorageBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+  
+  TestManagerStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: DeployTestManagerStorageBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  DataServiceStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: DeployDataServiceStorageBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  AiCenterStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: DeployAiCenterStorageBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  DocumentUnderstandingStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: DeployDocumentUnderstandingStorageBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  TaskMiningStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: DeployTaskMiningStorageBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  ProcessMiningStorageBucket:
+    Type: 'AWS::S3::Bucket'
+    Condition: DeployProcessMiningStorageBucket
+    DeletionPolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+  
+  ObjectStorageBucketsCleanupLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Description: >-
+        IAM Role to be assumed by Lambda functions for cleaning up the object storage S3 bucket before delete
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: ConfigS3DeleteAllow
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetAccelerateConfiguration'
+                  - 's3:GetBucketLocation'
+                  - 's3:GetBucketVersioning'
+                  - 's3:ListBucket'
+                  - 's3:ListBucketVersions'
+                  - 's3:ListBucketMultipartUploads'
+                Resource:
+                  - !If [UsingSharedBucket, !Sub "${SharedStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [NotUsingSharedBucket, !Sub "${PlatformStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [DeployOrchestratorStorageBucket, !Sub "${OrchestratorStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [DeployAppsStorageBucket, !Sub "${AppsStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [DeployTestManagerStorageBucket, !Sub "${TestManagerStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [DeployDataServiceStorageBucket, !Sub "${DataServiceStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [DeployAiCenterStorageBucket, !Sub "${AiCenterStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [DeployDocumentUnderstandingStorageBucket, !Sub "${DocumentUnderstandingStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [DeployTaskMiningStorageBucket, !Sub "${TaskMiningStorageBucket.Arn}", !Ref "AWS::NoValue"]
+                  - !If [DeployProcessMiningStorageBucket, !Sub "${ProcessMiningStorageBucket.Arn}", !Ref "AWS::NoValue"]
+              - Effect: Allow
+                Action:
+                  - 's3:DeleteObject'
+                  - 's3:DeleteObjectVersion'
+                Resource:
+                  - !If [UsingSharedBucket, !Sub "${SharedStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [NotUsingSharedBucket, !Sub "${PlatformStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [DeployOrchestratorStorageBucket, !Sub "${OrchestratorStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [DeployAppsStorageBucket, !Sub "${AppsStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [DeployTestManagerStorageBucket, !Sub "${TestManagerStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [DeployDataServiceStorageBucket, !Sub "${DataServiceStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [DeployAiCenterStorageBucket, !Sub "${AiCenterStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [DeployDocumentUnderstandingStorageBucket, !Sub "${DocumentUnderstandingStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [DeployTaskMiningStorageBucket, !Sub "${TaskMiningStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+                  - !If [DeployProcessMiningStorageBucket, !Sub "${ProcessMiningStorageBucket.Arn}/*", !Ref "AWS::NoValue"]
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub arn:${AWS::Partition}:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - 'xray:PutTraceSegments'
+                Resource: !Sub arn:${AWS::Partition}:xray:*:*:*
+
+
+  ObjectStorageBucketsCleanupFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: >-
+        Delete all objects inside the Config S3 bucket when the stack is deleted
+      Handler: lambda_function.handler
+      Role: !GetAtt ObjectStorageBucketsCleanupLambdaRole.Arn
+      Code:
+        S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+        S3Key: !Sub '${QSS3KeyPrefix}functions/packages/EmptyS3Bucket/lambda.zip'
+      Runtime: python3.9
+      Timeout: 900
+      TracingConfig:
+        Mode: Active
+
+  ObjectStorageBucketsCleanup:
+    Type: 'Custom::ObjectStorageBucketCleanupFunction'
+    Properties:
+      ServiceToken: !GetAtt ObjectStorageBucketsCleanupFunction.Arn
+      BucketNames: 
+        - !If [UsingSharedBucket, !Ref SharedStorageBucket, !Ref "AWS::NoValue"]
+        - !If [NotUsingSharedBucket, !Ref PlatformStorageBucket, !Ref "AWS::NoValue"]
+        - !If [DeployOrchestratorStorageBucket, !Ref OrchestratorStorageBucket, !Ref "AWS::NoValue"]
+        - !If [DeployAppsStorageBucket, !Ref AppsStorageBucket, !Ref "AWS::NoValue"]
+        - !If [DeployTestManagerStorageBucket, !Ref TestManagerStorageBucket, !Ref "AWS::NoValue"]
+        - !If [DeployDataServiceStorageBucket, !Ref DataServiceStorageBucket, !Ref "AWS::NoValue"]
+        - !If [DeployAiCenterStorageBucket, !Ref AiCenterStorageBucket, !Ref "AWS::NoValue"]
+        - !If [DeployDocumentUnderstandingStorageBucket, !Ref DocumentUnderstandingStorageBucket, !Ref "AWS::NoValue"]
+        - !If [DeployTaskMiningStorageBucket, !Ref TaskMiningStorageBucket, !Ref "AWS::NoValue"]
+        - !If [DeployProcessMiningStorageBucket, !Ref ProcessMiningStorageBucket, !Ref "AWS::NoValue"]
+
+Outputs:
+  SharedStorageBucket:
+    Condition: UsingSharedBucket
+    Description: Name of shared S3 bucket used for object storage
+    Value: !Ref SharedStorageBucket
+  PlatformStorageBucket:
+    Condition: NotUsingSharedBucket
+    Description: Name of Platform S3 bucket used for object storage
+    Value: !Ref PlatformStorageBucket
+  OrchestratorStorageBucket:
+    Condition: DeployOrchestratorStorageBucket
+    Description: Name of Orchestrator S3 bucket used for object storage
+    Value: !Ref OrchestratorStorageBucket
+  AppsStorageBucket:
+    Condition: DeployAppsStorageBucket
+    Description: Name of Apps S3 bucket used for object storage
+    Value: !Ref AppsStorageBucket
+  TestManagerStorageBucket:
+    Condition: DeployTestManagerStorageBucket
+    Description: Name of Test Manager S3 bucket used for object storage
+    Value: !Ref TestManagerStorageBucket
+  DataServiceStorageBucket:
+    Condition: DeployDataServiceStorageBucket
+    Description: Name of Data Service S3 bucket used for object storage
+    Value: !Ref DataServiceStorageBucket
+  AiCenterStorageBucket:
+    Condition: DeployAiCenterStorageBucket
+    Description: Name of Ai Center S3 bucket used for object storage
+    Value: !Ref AiCenterStorageBucket
+  DocumentUnderstandingStorageBucket:
+    Condition: DeployDocumentUnderstandingStorageBucket
+    Description: Name of Document Understanding S3 bucket used for object storage
+    Value: !Ref DocumentUnderstandingStorageBucket
+  TaskMiningStorageBucket:
+    Condition: DeployTaskMiningStorageBucket
+    Description: Name of Task Mining S3 bucket used for object storage
+    Value: !Ref TaskMiningStorageBucket
+  ProcessMiningStorageBucket:
+    Condition: DeployProcessMiningStorageBucket
+    Description: Name of Process Mining S3 bucket used for object storage
+    Value: !Ref ProcessMiningStorageBucket

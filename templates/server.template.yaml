@@ -71,7 +71,7 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
-  ASRobots: 
+  ASRobots:
     Description: Chose false to disable Automation Suite Robots installation.
     Type: String
     Default: 'true'
@@ -150,6 +150,46 @@ Parameters:
     Description: DNS name of the backup server
     Type: String
     Default: ""
+  SharedStorageBucket:
+    Description: Name of the shared external object S3 bucket
+    Type: String
+    Default: ""
+  PlatformStorageBucket:
+    Description: Name of the Platform external object S3 bucket
+    Type: String
+    Default: ""
+  OrchestratorStorageBucket:
+    Description: Name of the Orchestrator external object S3 bucket
+    Type: String
+    Default: ""
+  AppsStorageBucket:
+    Description: Name of the Apps external object S3 bucket
+    Type: String
+    Default: ""
+  TestManagerStorageBucket:
+    Description: Name of the Test Manger external object S3 bucket
+    Type: String
+    Default: ""
+  DataServiceStorageBucket:
+    Description: Name of the Data Service external object S3 bucket
+    Type: String
+    Default: ""
+  AiCenterStorageBucket:
+    Description: Name of the AiCenter external object S3 bucket
+    Type: String
+    Default: ""
+  DocumentUnderstandingStorageBucket:
+    Description: Name of the Document Understanding external object S3 bucket
+    Type: String
+    Default: ""
+  TaskMiningStorageBucket:
+    Description: Name of the Task Mining external object S3 bucket
+    Type: String
+    Default: ""
+  ProcessMiningStorageBucket:
+    Description: Name of the Process Mining external object S3 bucket
+    Type: String
+    Default: ""
 Conditions:
   UsingDefaultBucket: !Equals
     - !Ref QSS3BucketName
@@ -166,7 +206,7 @@ Conditions:
   InstallingASRobots: !Equals
     - !Ref ASRobots
     - "true"
-  UseExternalOrch: !Equals 
+  UseExternalOrch: !Equals
     - !Ref UseExternalOrchestrator
     - "true"
   DeployingGpu: !Equals
@@ -186,7 +226,17 @@ Conditions:
   DeployIam: !Or
     - !Equals ["", !Ref IamRoleArn]
     - !Equals ["", !Ref IamRoleName]
-  IsBackupEnabled: !Not [ !Equals [ !Ref BackupFileSystemDns, "" ] ]
+  IsBackupEnabled: !Not [!Equals [!Ref BackupFileSystemDns, ""]]
+  DeploySharedStorageBucket: !Not [!Equals [!Ref SharedStorageBucket, ""]]
+  DeployPlatformStorageBucket: !Not [!Equals [!Ref PlatformStorageBucket, ""]]
+  DeployOrchestratorStorageBucket: !Not [!Equals [!Ref OrchestratorStorageBucket, ""]]
+  DeployAppsStorageBucket: !Not [!Equals [!Ref AppsStorageBucket, ""]]
+  DeployTestManagerStorageBucket: !Not [!Equals [!Ref TestManagerStorageBucket, ""]]
+  DeployDataServiceStorageBucket: !Not [!Equals [!Ref DataServiceStorageBucket, ""]]
+  DeployAiCenterStorageBucket: !Not [!Equals [!Ref AiCenterStorageBucket, ""]]
+  DeployDocumentUnderstandingStorageBucket: !Not [!Equals [!Ref DocumentUnderstandingStorageBucket, ""]]
+  DeployTaskMiningStorageBucket: !Not [!Equals [!Ref TaskMiningStorageBucket, ""]]
+  DeployProcessMiningStorageBucket: !Not [!Equals [!Ref ProcessMiningStorageBucket, ""]]
   IsASRobotsProduction: !And
     - !Condition InstallingASRobots
     - !Condition IsMultiNode
@@ -240,8 +290,6 @@ Resources:
           FromPort: 8472
           ToPort: 8472
           CidrIp: !Ref VPCCIDR
-  
-
   InstanceAMIImageName:
     Type: AWS::SSM::Parameter
     Condition: FindingAmiAtDeploy
@@ -250,7 +298,6 @@ Resources:
       Type: String
       Value: RHEL-8.6*_HVM-20*
       Description: SSM Parameter for storing the Image Name of the AMI used in the ASGs.
-  
   InstanceAmiId:
     Type: AWS::SSM::Parameter
     Properties:
@@ -258,7 +305,6 @@ Resources:
       Type: String
       Value: !If [FindingAmiAtDeploy, !GetAtt InstanceAMI.ImageId, !Ref AmiId]
       Description: SSM Parameter for storing the AMI used in the ASGs.
-
   InstanceAMI:
     Type: 'Custom::InstanceAMI'
     Condition: FindingAmiAtDeploy
@@ -269,7 +315,6 @@ Resources:
       Architecture: x86_64
       VirtualizationType: hvm
       Owners: '309956199498'
-
   GpuInstanceAMI:
     Type: 'Custom::InstanceAMI'
     Condition: FindingGpuAmiAtDeploy
@@ -280,8 +325,6 @@ Resources:
       Architecture: x86_64
       VirtualizationType: hvm
       Owners: '309956199498'
-
-
   ServiceFabricIamRole:
     Type: 'AWS::IAM::Role'
     Condition: DeployIam
@@ -341,7 +384,7 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Action:
-            - autoscaling:CompleteLifecycleAction
+              - autoscaling:CompleteLifecycleAction
             Resource:
               - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${ServerAutoScalingGroup}"
               - !If
@@ -446,6 +489,66 @@ Resources:
       PolicyName: InstallerDownloadUrlParameterReadAccess
       Roles:
         - !Ref ServiceFabricIamRole
+  ExternalStorageAccessPolicy:
+    Type: 'AWS::IAM::Policy'
+    Condition: DeployIam
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - s3:ListAllMyBuckets
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::*"
+            Effect: Allow
+          - Action:
+              - s3:GetBucketAcl
+              - s3:GetBucketCORS
+              - s3:GetBucketLocation
+              - s3:GetBucketNotification
+              - s3:GetBucketPolicy
+              - s3:PutBucketPolicy
+              - s3:DeleteBucketPolicy
+              - s3:GetBucketVersioning
+              - s3:ListBucket
+              - s3:ListBucketMultipartUploads
+              - s3:PutBucketAcl
+              - s3:PutBucketCORS
+            Resource:
+              - !If [DeploySharedStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${SharedStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployPlatformStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${PlatformStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployOrchestratorStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${OrchestratorStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployAppsStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${AppsStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployTestManagerStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${TestManagerStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployDataServiceStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${DataServiceStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployAiCenterStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${AiCenterStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployDocumentUnderstandingStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${DocumentUnderstandingStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployTaskMiningStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${TaskMiningStorageBucket}", !Ref "AWS::NoValue"]
+              - !If [DeployProcessMiningStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${ProcessMiningStorageBucket}", !Ref "AWS::NoValue"]
+            Effect: Allow
+          - Action:
+              - s3:*Object
+              - s3:*ObjectAcl
+              - s3:*ObjectAttributes
+              - s3:*ObjectVersion
+              - s3:*ObjectVersionTagging
+              - s3:AbortMultipartUpload
+              - s3:ListMultipartUploadParts
+            Resource:
+              - !If [DeploySharedStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${SharedStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployPlatformStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${PlatformStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployOrchestratorStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${OrchestratorStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployAppsStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${AppsStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployTestManagerStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${TestManagerStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployDataServiceStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${DataServiceStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployAiCenterStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${AiCenterStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployDocumentUnderstandingStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${DocumentUnderstandingStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployTaskMiningStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${TaskMiningStorageBucket}/*", !Ref "AWS::NoValue"]
+              - !If [DeployProcessMiningStorageBucket, !Sub "arn:${AWS::Partition}:s3:::${ProcessMiningStorageBucket}/*", !Ref "AWS::NoValue"]
+            Effect: Allow
+      PolicyName: ExternalStorageAccess
+      Roles:
+        - !Ref ServiceFabricIamRole
   ServerLaunchConfiguration:
     Type: 'AWS::EC2::LaunchTemplate'
     Metadata:
@@ -462,7 +565,7 @@ Resources:
             - install_ssm_agent
             - download_sf
             - disk_setup
-            - !If 
+            - !If
               - UseExternalOrch
               - external_orch_cert_config
               - !Ref "AWS::NoValue"
@@ -517,7 +620,7 @@ Resources:
             /root/download-sf-installer.sh:
               content: !Sub |
                 #!/bin/bash -x
-                wget "$(aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
+                wget "$(/usr/local/bin/aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
               owner: "root"
               group: "root"
               mode: "00700"
@@ -635,9 +738,10 @@ Resources:
               command: !Sub 'echo "${OrchestratorCertificate}" | base64 -d > /root/installer/orchestrator.cer'
             02_populate_identity_cert:
               command: !Sub 'echo "${IdentityCertificate}" | base64 -d > /root/installer/identity.cer'
-
     Properties:
       LaunchTemplateData:
+        MetadataOptions:
+          HttpPutResponseHopLimit: 3
         BlockDeviceMappings:
           - DeviceName: /dev/sda1
             Ebs:
@@ -657,12 +761,6 @@ Resources:
               Encrypted: true
               VolumeSize: 16
               VolumeType: gp3
-          - DeviceName: /dev/sdf
-            Ebs:
-              DeleteOnTermination: false
-              Encrypted: true
-              VolumeSize: 512
-              VolumeType: gp3
           - DeviceName: /dev/sdd
             Ebs:
               DeleteOnTermination: true
@@ -678,7 +776,6 @@ Resources:
                 VolumeSize: 32
                 VolumeType: gp3
             - !Ref "AWS::NoValue"
-          
         ImageId: !Sub '{{resolve:ssm:${InstanceAmiId}}}'
         IamInstanceProfile:
           Arn: !GetAtt ServiceFabricInstanceProfile.Arn
@@ -706,7 +803,7 @@ Resources:
                      --stack ${AWS::StackName } \
                      --resource ServerAutoScalingGroup \
                      --region ${AWS::Region }
-            
+
             if [ $init_exit_code -eq 0 ]; then
               lifecycle_action="CONTINUE"
             else
@@ -736,7 +833,7 @@ Resources:
             - install_ssm_agent
             - download_sf
             - disk_setup
-            - !If 
+            - !If
               - UseExternalOrch
               - external_orch_cert_config
               - !Ref "AWS::NoValue"
@@ -791,7 +888,7 @@ Resources:
             /root/download-sf-installer.sh:
               content: !Sub |
                 #!/bin/bash -x
-                wget "$(aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
+                wget "$(/usr/local/bin/aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
               owner: "root"
               group: "root"
               mode: "00700"
@@ -876,9 +973,10 @@ Resources:
               command: !Sub 'echo "${OrchestratorCertificate}" | base64 -d > /root/installer/orchestrator.cer'
             02_populate_identity_cert:
               command: !Sub 'echo "${IdentityCertificate}" | base64 -d > /root/installer/identity.cer'
-
     Properties:
       LaunchTemplateData:
+        MetadataOptions:
+          HttpPutResponseHopLimit: 3
         BlockDeviceMappings:
           - DeviceName: /dev/sda1
             Ebs:
@@ -917,7 +1015,7 @@ Resources:
                      --stack ${AWS::StackName } \
                      --resource AgentAutoScalingGroup \
                      --region ${AWS::Region }
-            
+
             if [ $init_exit_code -eq 0 ]; then
               lifecycle_action="CONTINUE"
             else
@@ -930,7 +1028,6 @@ Resources:
                                                                      --lifecycle-hook-name ${AWS::StackName}-AgentInstallFinishedHook \
                                                                      --auto-scaling-group-name "$asg_name" \
                                                                      --instance-id "$instance_id"
-
   ASRobotsLaunchTemplate:
     Type: 'AWS::EC2::LaunchTemplate'
     Metadata:
@@ -998,7 +1095,7 @@ Resources:
             /root/download-sf-installer.sh:
               content: !Sub |
                 #!/bin/bash -x
-                wget "$(aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
+                wget "$(/usr/local/bin/aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
               owner: "root"
               group: "root"
               mode: "00700"
@@ -1077,9 +1174,10 @@ Resources:
             02_start_cw_agent:
               command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
               ignoreErrors: "true"
-
     Properties:
       LaunchTemplateData:
+        MetadataOptions:
+          HttpPutResponseHopLimit: 3
         BlockDeviceMappings:
           - DeviceName: /dev/sda1
             Ebs:
@@ -1124,7 +1222,7 @@ Resources:
                      --stack ${AWS::StackName } \
                      --resource ASRobotsAutoScalingGroup \
                      --region ${AWS::Region }
-            
+
             if [ $init_exit_code -eq 0 ]; then
               lifecycle_action="CONTINUE"
             else
@@ -1137,7 +1235,6 @@ Resources:
                                                                      --lifecycle-hook-name ${AWS::StackName}-ASRobotsInstallFinishedHook \
                                                                      --auto-scaling-group-name "$asg_name" \
                                                                      --instance-id "$instance_id"
-
   AgentAutoScalingGroup:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     Condition: IsMultiNode
@@ -1170,7 +1267,6 @@ Resources:
       TargetGroupARNs:
         - !Ref DeploymentTargetGroupArn
       VPCZoneIdentifier: !Ref PrivateSubnetIDs
-
   ServerAutoScalingGroup:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     CreationPolicy:
@@ -1204,7 +1300,6 @@ Resources:
         - !Ref KubeTargetGroupArn
         - !Ref Rke2RegistrationTargetGroupArn
       VPCZoneIdentifier: !Ref PrivateSubnetIDs
-
   ASRobotsAutoScalingGroup:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     CreationPolicy:
@@ -1236,7 +1331,6 @@ Resources:
       TargetGroupARNs:
         - !Ref DeploymentTargetGroupArn
       VPCZoneIdentifier: !Ref PrivateSubnetIDs
-
   ASRobotsAsgLifeCycleHookLaunching:
     Type: "AWS::AutoScaling::LifecycleHook"
     Properties:
@@ -1245,7 +1339,6 @@ Resources:
       LifecycleTransition: "autoscaling:EC2_INSTANCE_LAUNCHING"
       HeartbeatTimeout: 7200
       DefaultResult: ABANDON
-
   AgentAsgLifeCycleHookLaunching:
     Type: "AWS::AutoScaling::LifecycleHook"
     Condition: IsMultiNode
@@ -1255,7 +1348,6 @@ Resources:
       LifecycleTransition: "autoscaling:EC2_INSTANCE_LAUNCHING"
       HeartbeatTimeout: 7200
       DefaultResult: ABANDON
-
   ServerAsgLifeCycleHookLaunching:
     Type: "AWS::AutoScaling::LifecycleHook"
     Properties:
@@ -1264,7 +1356,6 @@ Resources:
       LifecycleTransition: "autoscaling:EC2_INSTANCE_LAUNCHING"
       HeartbeatTimeout: 7200
       DefaultResult: ABANDON
-
   BastionSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Condition: DeployingBastion
@@ -1276,36 +1367,34 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
-
   AsgProcessModificationRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-        - Action:
-          - sts:AssumeRole
-          Effect: Allow
-          Principal:
-            Service:
-            - lambda.amazonaws.com
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
       Policies:
         - PolicyName: AsgProcessModification
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-            - Effect: Allow
-              Action:
-              - autoscaling:ResumeProcesses
-              - autoscaling:SuspendProcesses
-              Resource: !Sub arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${ServerAutoScalingGroup}
-            - Effect: Allow
-              Action:
-              - logs:CreateLogGroup
-              - logs:CreateLogStream
-              - logs:PutLogEvents
-              Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
-
+              - Effect: Allow
+                Action:
+                  - autoscaling:ResumeProcesses
+                  - autoscaling:SuspendProcesses
+                Resource: !Sub arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${ServerAutoScalingGroup}
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
   AsgProcessModifierFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -1317,14 +1406,12 @@ Resources:
       Role: !If [DeployIam, !GetAtt AsgProcessModificationRole.Arn, !Ref IamRoleArn]
       Runtime: python3.9
       Timeout: 30
-
   ModifyAsg:
     Type: 'Custom::ModifyAsg'
     Properties:
       ServiceToken: !GetAtt AsgProcessModifierFunction.Arn
       AutoScalingGroupName: !Ref ServerAutoScalingGroup
       RegionName: !Ref 'AWS::Region'
-
   BastionHost:
     Type: 'AWS::EC2::Instance'
     Condition: DeployingBastion
@@ -1429,11 +1516,9 @@ Resources:
                    --stack ${AWS::StackName } \
                    --resource BastionHost \
                    --region ${AWS::Region }
-
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-UIPath-ServiceFabric-Bastion'
-
   TaskMiningNode:
     Type: 'AWS::EC2::Instance'
     Condition: InstallingTaskMining
@@ -1451,7 +1536,7 @@ Resources:
             - install_ssm_agent
             - download_sf
             - disk_setup
-            - !If 
+            - !If
               - UseExternalOrch
               - external_orch_cert_config
               - !Ref "AWS::NoValue"
@@ -1506,7 +1591,7 @@ Resources:
             /root/download-sf-installer.sh:
               content: !Sub |
                 #!/bin/bash -x
-                wget "$(aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
+                wget "$(/usr/local/bin/aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
               owner: "root"
               group: "root"
               mode: "00700"
@@ -1591,7 +1676,6 @@ Resources:
               command: !Sub 'echo "${OrchestratorCertificate}" | base64 -d > /root/installer/orchestrator.cer'
             02_populate_identity_cert:
               command: !Sub 'echo "${IdentityCertificate}" | base64 -d > /root/installer/identity.cer'
-
     CreationPolicy:
       ResourceSignal:
         Count: 1
@@ -1639,11 +1723,9 @@ Resources:
                    --stack ${AWS::StackName } \
                    --resource TaskMiningNode \
                    --region ${AWS::Region }
-
       Tags:
         - Key: Name
           Value: 'UiPath-ServiceFabric-TaskMining'
-
   GpuEnabledNode:
     Type: 'AWS::EC2::Instance'
     Condition: DeployingGpu
@@ -1661,7 +1743,7 @@ Resources:
             - install_ssm_agent
             - download_sf
             - disk_setup
-            - !If 
+            - !If
               - UseExternalOrch
               - external_orch_cert_config
               - !Ref "AWS::NoValue"
@@ -1761,7 +1843,7 @@ Resources:
             /root/download-sf-installer.sh:
               content: !Sub |
                 #!/bin/bash -x
-                wget "$(aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
+                wget "$(/usr/local/bin/aws ssm get-parameter --name "${InstallerDownloadUrlParameterName}" | jq -r '.Parameter.Value')" -O /root/sf-installer.zip
               owner: "root"
               group: "root"
               mode: "00700"
@@ -1827,7 +1909,6 @@ Resources:
               owner: "root"
               group: "root"
               mode: "000700"
-
           commands:
             01_install_prerequisites:
               command: /root/installer/validateUiPathASReadiness.sh install-packages --install-type online
@@ -1845,7 +1926,6 @@ Resources:
               command: !Sub 'echo "${OrchestratorCertificate}" | base64 -d > /root/installer/orchestrator.cer'
             02_populate_identity_cert:
               command: !Sub 'echo "${IdentityCertificate}" | base64 -d > /root/installer/identity.cer'
-
     CreationPolicy:
       ResourceSignal:
         Count: 1
@@ -1892,8 +1972,6 @@ Resources:
       Tags:
         - Key: Name
           Value: 'UiPath-ServiceFabric-GpuNode'
-
-
 Outputs:
   InstanceAMIImageNameSSMParameter:
     Description: Name of the SSM Parameter that stores the Image Name used for getting the AMI
@@ -1904,7 +1982,7 @@ Outputs:
     Value: !Ref InstanceAmiId
   AgentAsgName:
     Description: Agent AutoScalingGroup name
-    Value: !If [IsMultiNode, !Ref AgentAutoScalingGroup, ''] 
+    Value: !If [IsMultiNode, !Ref AgentAutoScalingGroup, '']
   ServerAsgName:
     Description: Server AutoScalingGroup name
     Value: !Ref ServerAutoScalingGroup
@@ -1922,7 +2000,7 @@ Outputs:
     Value: !Ref ServerLaunchConfiguration
   AgentLaunchTemplateName:
     Description: Agent AutoScalingGroup Launch Template name
-    Value: !If [IsMultiNode, !Ref AgentLaunchConfiguration, ''] 
+    Value: !If [IsMultiNode, !Ref AgentLaunchConfiguration, '']
   ASRobotsLaunchTemplateName:
     Description: AS robots agent AutoScalingGroup Launch Template name
     Value: !Ref ASRobotsLaunchTemplate
